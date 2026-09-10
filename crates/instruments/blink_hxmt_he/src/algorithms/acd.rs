@@ -12,8 +12,8 @@ use blink_core::types::AcdCounts;
 
 /// 基线窗与搜索邻域一致：候选两侧各 1 s，紧贴候选的 10 ms hollow 挖掉，
 /// 避免瞬变自身拖尾污染基线（对应 SearchConfig 的 neighbor / hollow）。
-const NEIGHBOR_S: f64 = 1.0;
-const HOLLOW_S: f64 = 0.01;
+pub(crate) const NEIGHBOR_S: f64 = 1.0;
+pub(crate) const HOLLOW_S: f64 = 0.01;
 
 /// 对时间有序的 kept 事例数组统计候选窗 [start, stop]（闭区间）与两侧
 /// 基线窗 [start−1s, start−10ms) ∪ (stop+10ms, stop+1s] 的 ACD 计数。

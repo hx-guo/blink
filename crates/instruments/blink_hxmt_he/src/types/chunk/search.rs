@@ -1,5 +1,6 @@
 use super::Chunk;
 use crate::algorithms::acd::acd_counts;
+use crate::algorithms::detectors::detector_counts;
 use crate::types::{Event, HxmtHe};
 use blink_algorithms::detector_share::{MAX_DETECTOR_FRACTION, max_detector_fraction};
 use blink_algorithms::snapshot_stepping::{SearchConfig, search_new};
@@ -99,8 +100,12 @@ pub fn search(chunk: &Chunk) -> Vec<Signal<Event>> {
                     candidate.start.met(),
                     candidate.stop.met(),
                 )),
-                // 暂未填：方向分析没在 HXMT 上立项，见 blink_core::DetectorCounts
-                detectors: None,
+                // 逐路计数与 ACD 一样只有此刻取得到，见 algorithms::detectors
+                detectors: Some(detector_counts(
+                    &events,
+                    candidate.start.met(),
+                    candidate.stop.met(),
+                )),
             })
         })
         .collect::<Vec<_>>();
