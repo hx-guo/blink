@@ -47,4 +47,20 @@ impl Detector {
 
     /// 分组顺序。缺哪一类就少哪一组，`Chunk` 按实际到齐的类型连续编号。
     pub const ALL: [Self; 3] = [Self::Nai, Self::Bgo0, Self::Bgo1];
+
+    /// 14 路探头的固定顺序，`Signal::detectors` 的下标就按这个来。
+    ///
+    /// 与分组无关：分组是 3 组（12 NaI 合一 + b0 + b1），而逐路计数要的是
+    /// 每一路各自的数——12 个 NaI 朝向各不相同，合成一路就把方向信息抹掉了。
+    pub const UNIT_NAMES: [&'static str; 14] = [
+        "n0", "n1", "n2", "n3", "n4", "n5", "n6", "n7", "n8", "n9", "na", "nb", "b0", "b1",
+    ];
+
+    /// 探头代号 -> `UNIT_NAMES` 的下标。归档里没有别的代号，认不出就是数据有问题。
+    pub fn unit_index(name: &str) -> Option<u8> {
+        Self::UNIT_NAMES
+            .iter()
+            .position(|n| *n == name)
+            .map(|i| i as u8)
+    }
 }

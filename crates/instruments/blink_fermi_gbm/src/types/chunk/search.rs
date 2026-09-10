@@ -1,12 +1,14 @@
 use blink_algorithms::detector_share::{MAX_DETECTOR_FRACTION, max_detector_fraction};
 use blink_algorithms::snapshot_stepping::{SearchConfig, search_new};
 use blink_core::traits::Event as _;
-use blink_core::types::{Attitude, MissionElapsedTime, Position, Signal, Trajectory};
+use blink_core::types::{
+    Attitude, DetectorCounts, MissionElapsedTime, Position, Signal, Trajectory,
+};
 use std::sync::atomic::Ordering;
 use uom::si::f64::*;
 
 use super::Chunk;
-use crate::types::{Event, FermiGbm};
+use crate::types::{Detector, Event, FermiGbm};
 
 /// 允许挤在同一个时间戳上的计数占窗内计数的最大比例。
 ///
@@ -51,6 +53,59 @@ fn simultaneous_fraction(
     longest as f64 / window.len() as f64
 }
 
+/// 逐路计数的基线窗半宽（秒）。与 GECAM 同口径。
+const DETECTOR_BASELINE_SECONDS: f64 = 1.0;
+
+/// 候选窗与邻域基线窗内的逐路计数，14 个槽按 `Detector::UNIT_NAMES` 排。
+///
+/// 这个量**事后无法从候选表复原**，不当场存下来，日后要做方向分析就得重读
+/// 全部 TTE。用途是方向：12 个 NaI 朝向各不相同，逐路计数的相对高低就编码了
+/// 入射方向；更省事的一问是"从天顶来还是从地球来"，朝地那几路亮不亮，
+/// 直接分开 TGF 与 GRB、TGF 与 TEB。
+///
+/// 注意分组与逐路是两件事：搜索按**类型**分 3 组（12 个 NaI 合成一组 + b0 + b1），
+/// 合成那一步正是把方向信息抹掉的地方，所以这里按 `Event::unit` 逐路数。
+///
+/// 基线窗一并存，否则分不清"这一路亮"和"这一路本来就快"。
+///
+/// 2017-10 之前的年份只有 2 路 BGO，12 个 NaI 的槽会是零——那是**如实记录
+/// 没有数据**，不是这几路没响应。判方向前先看 `baseline` 是不是也为零。
+fn detector_counts(
+    events: &[Event],
+    start: MissionElapsedTime<FermiGbm>,
+    stop: MissionElapsedTime<FermiGbm>,
+) -> DetectorCounts {
+    let (start, stop) = (start.met(), stop.met());
+    let (before, after) = (
+        start - DETECTOR_BASELINE_SECONDS,
+        stop + DETECTOR_BASELINE_SECONDS,
+    );
+
+    let slots = Detector::UNIT_NAMES.len();
+    let mut window = vec![0u32; slots];
+    let mut baseline = vec![0u32; slots];
+    let lower = events.partition_point(|event| event.time().met() < before);
+    let upper = events.partition_point(|event| event.time().met() <= after);
+    for event in &events[lower..upper] {
+        let slot = event.unit as usize;
+        if slot >= slots {
+            continue;
+        }
+        let time = event.time().met();
+        if time >= start && time <= stop {
+            window[slot] += 1;
+        } else {
+            baseline[slot] += 1;
+        }
+    }
+
+    DetectorCounts {
+        window,
+        baseline,
+        baseline_seconds: 2.0 * DETECTOR_BASELINE_SECONDS,
+    }
+}
+
 pub(super) fn search(chunk: &Chunk) -> Vec<Signal<Event>> {
     // NaI 与 BGO 分组搜索：两者的响应差得太远，合成一路等于拿 BGO 的信号去
     // 配 NaI 的本底。`group_number` 取本小时实际到齐的类型数，这样只有 BGO
@@ -73,6 +128,7 @@ pub(super) fn search(chunk: &Chunk) -> Vec<Signal<Event>> {
                     time: MissionElapsedTime::new(*time),
                     channel: *channel,
                     detector: file.detector,
+                    unit: file.unit,
                     group,
                 })
                 .filter(Event::keep),
@@ -175,7 +231,7 @@ pub(super) fn search(chunk: &Chunk) -> Vec<Signal<Event>> {
                 acd: None,
                 // 暂未填：GBM 14 路 NaI 本可定向，但全量正在跑，不中途改产物内容
                 // ——见 blink_core::DetectorCounts
-                detectors: None,
+                detectors: Some(detector_counts(&events, candidate.start, candidate.stop)),
             })
         })
         .collect::<Vec<_>>();
@@ -192,9 +248,7 @@ pub(super) fn search(chunk: &Chunk) -> Vec<Signal<Event>> {
     chunk
         .dropped_simultaneous
         .store(n_simultaneous, Ordering::Relaxed);
-    chunk
-        .events_outside_gti
-        .store(n_outside, Ordering::Relaxed);
+    chunk.events_outside_gti.store(n_outside, Ordering::Relaxed);
 
     signals
 }
@@ -202,7 +256,6 @@ pub(super) fn search(chunk: &Chunk) -> Vec<Signal<Event>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::Detector;
 
     fn events(times: &[f64]) -> Vec<Event> {
         times
@@ -211,9 +264,88 @@ mod tests {
                 time: MissionElapsedTime::new(*time),
                 channel: 40,
                 detector: Detector::Nai,
+                unit: 0,
                 group: 0,
             })
             .collect()
+    }
+
+    fn event_at(time: f64, unit: u8) -> Event {
+        Event {
+            time: MissionElapsedTime::new(time),
+            channel: 40,
+            detector: if unit < 12 {
+                Detector::Nai
+            } else if unit == 12 {
+                Detector::Bgo0
+            } else {
+                Detector::Bgo1
+            },
+            unit,
+            group: 0,
+        }
+    }
+
+    #[test]
+    fn per_unit_counts_split_the_window_from_the_baseline() {
+        // 三条在窗内（n0, n0, b1），两条在基线窗内（n5 各一侧）。
+        let events = vec![
+            event_at(1000.0 - 0.5, 5),
+            event_at(1000.001, 0),
+            event_at(1000.002, 0),
+            event_at(1000.003, 13),
+            event_at(1000.01 + 0.5, 5),
+        ];
+        let counts = detector_counts(
+            &events,
+            MissionElapsedTime::new(1000.0),
+            MissionElapsedTime::new(1000.01),
+        );
+        assert_eq!(counts.window.len(), 14);
+        assert_eq!(counts.window[0], 2, "n0 窗内两条");
+        assert_eq!(counts.window[13], 1, "b1 窗内一条");
+        assert_eq!(counts.window[5], 0, "n5 的两条都在窗外");
+        assert_eq!(counts.baseline[5], 2, "n5 基线窗内两条");
+        assert_eq!(counts.baseline[0], 0);
+        assert_eq!(counts.baseline_seconds, 2.0 * DETECTOR_BASELINE_SECONDS);
+    }
+
+    #[test]
+    fn a_bgo_only_hour_leaves_the_nai_slots_zero() {
+        // 2017-10 之前只有 2 路 BGO：12 个 NaI 的槽是「没有数据」而不是
+        // 「没响应」，window 与 baseline 同时为零才是那个意思。
+        let events = vec![
+            event_at(1000.001, 12),
+            event_at(1000.002, 13),
+            event_at(1000.5, 12),
+        ];
+        let counts = detector_counts(
+            &events,
+            MissionElapsedTime::new(1000.0),
+            MissionElapsedTime::new(1000.01),
+        );
+        assert_eq!(&counts.window[0..12], &[0u32; 12]);
+        assert_eq!(&counts.baseline[0..12], &[0u32; 12]);
+        assert_eq!(counts.window[12], 1);
+        assert_eq!(counts.baseline[12], 1);
+    }
+
+    #[test]
+    fn every_archive_detector_name_has_a_unit_index() {
+        // 逐路计数的下标就是这个，认不出代号会在载入时 panic，
+        // 所以归档里出现的每个代号都必须在表里。
+        for (i, name) in Detector::UNIT_NAMES.iter().enumerate() {
+            assert_eq!(Detector::unit_index(name), Some(i as u8), "{name}");
+        }
+        for detector in Detector::ALL {
+            for name in detector.names() {
+                assert!(
+                    Detector::unit_index(name).is_some(),
+                    "{name} 不在 UNIT_NAMES 里"
+                );
+            }
+        }
+        assert_eq!(Detector::unit_index("n12"), None);
     }
 
     fn fraction(times: &[f64]) -> f64 {
