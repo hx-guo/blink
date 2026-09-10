@@ -39,6 +39,7 @@ pub(super) fn search<S: Satellite>(chunk: &Chunk<S>) -> Vec<Signal<Event<S>>> {
     // `search_new` 假定输入有序。幅度大到有害的回跳已在 `exclusion` 挡掉，
     // 剩下的排一下就干净了——数组本来就基本有序，代价很低。
     events.sort();
+    let n_merged = dedupe_gain_pairs(&mut events);
 
     let gti: Vec<[MissionElapsedTime<Gecam<S>>; 2]> = chunk
         .evt_file
@@ -114,7 +115,7 @@ pub(super) fn search<S: Satellite>(chunk: &Chunk<S>) -> Vec<Signal<Event<S>>> {
                 false_positive_per_year: candidate.false_positive_per_year(),
                 attitude,
                 position: position.state,
-                acd: Some(cpd_counts(chunk, &events, candidate.start, candidate.stop)),
+                acd: cpd_counts(chunk, &events, candidate.start, candidate.stop),
                 detectors: Some(detector_counts(
                     chunk.evt_file.detector_count(),
                     &events,
@@ -137,8 +138,78 @@ pub(super) fn search<S: Satellite>(chunk: &Chunk<S>) -> Vec<Signal<Event<S>>> {
     chunk
         .events_outside_gti
         .store(n_outside_gti, Ordering::Relaxed);
+    chunk
+        .merged_gain_duplicates
+        .store(n_merged, Ordering::Relaxed);
 
     signals
+}
+
+/// 双增益重复记录去重：同一路探头、同一时戳的两条并成一条。返回并掉的条数。
+///
+/// **同一个物理光子会被 ADC 的两个增益支路各写一行。** 实测 GECAM-C
+/// 2023-06-15 12h 全 12 路：同探头同时戳的事例对占原始事例 6.635%，这些对
+/// **100%** 是 `GAIN_TYPE` 一高一低、`FLAG` 一个 0 一个 10、`EVT_PAIR`
+/// 两端都为真，而 PI 相同的占 0%（高增益那条中位 448 已进溢出道，低增益
+/// 那条中位 377）。所以它们不是两个光子，是一个光子的两条记录。
+///
+/// 多数时候高增益那条已经饱和进溢出道、被 `Event::keep` 的 `PI < 448` 挡掉，
+/// 一个物理事例只剩一条（占 98.8%）。但剩下的 1.2% 两条都过了准入，于是
+/// **约 3.25% 的准入后计数是重复计数**——而候选窗内这个比例是 6.82%，
+/// 富集 2.1 倍，**50.4% 的候选窗里至少含一对重复**。两条记录的时戳完全相同，
+/// 泊松独立性直接破掉，跟带电粒子跨探头同时点亮是同一类机制，只是发生在
+/// 一路探头内部。粗估反标定表明约 28% 的候选是这么造出来的。
+///
+/// **保留低增益那条。** 高增益支路会饱和，低增益那条永远是有效测量；两条都
+/// 没饱和时留哪条对搜索的计数没有影响，但对能量有——两档的 PI 是不是同一把
+/// 尺子还没核实，见 OPEN-QUESTIONS。
+///
+/// 判据用「同探头同时戳」这个实测事实，不用 `EVT_PAIR` 那一列：实测
+/// `EVT_PAIR` 为真的事例占 19.9%，而同戳对只占 7.9%，两者对不上（伴侣可能
+/// 被上游过滤掉、或差一个时戳格），语义没核实清楚之前不拿它当判据。
+///
+/// 输入必须已按时间排好。同一时戳的一串通常只有几条，最多不过探头路数，
+/// 所以串内 O(k²) 的比对可以忽略。
+fn dedupe_gain_pairs<S: Satellite>(events: &mut Vec<Event<S>>) -> usize {
+    let mut keep_run: Vec<bool> = Vec::with_capacity(64);
+    let mut write = 0usize;
+    let mut merged = 0usize;
+    let mut start = 0usize;
+
+    while start < events.len() {
+        let mut stop = start + 1;
+        while stop < events.len() && events[stop].time == events[start].time {
+            stop += 1;
+        }
+
+        keep_run.clear();
+        for a in start..stop {
+            // 同一路探头在这一串里另有一条时就并掉：留低增益（`gain_type` 大）
+            // 那条，两条增益档相同时留先出现的，规则与归并顺序无关
+            let superseded = (start..stop).any(|b| {
+                b != a
+                    && events[b].detector_id == events[a].detector_id
+                    && (events[b].gain_type > events[a].gain_type
+                        || (events[b].gain_type == events[a].gain_type && b < a))
+            });
+            keep_run.push(!superseded);
+        }
+
+        // 决定已经算完，往前挪不会影响本串的判断；`write <= start + offset`
+        // 恒成立，且 swap 只碰更靠前的位置，后面待挪的元素动不到
+        for (offset, keep) in keep_run.iter().enumerate() {
+            if *keep {
+                events.swap(write, start + offset);
+                write += 1;
+            } else {
+                merged += 1;
+            }
+        }
+        start = stop;
+    }
+
+    events.truncate(write);
+    merged
 }
 
 /// 候选窗里的 CPD 符合计数，随候选一起存下来。
@@ -154,12 +225,17 @@ pub(super) fn search<S: Satellite>(chunk: &Chunk<S>) -> Vec<Signal<Event<S>>> {
 ///
 /// **只统计，不否决。** 符合到什么程度才算带电粒子得拿真候选定标；在那之前
 /// 存原始计数而不是比例，泊松误差还在，阈值日后可以复议而不必重跑全量。
+///
+/// 这一小时没有 CPD 文件时返回 `None` 而不是一组零。GECAM-A 在 2025-03-12
+/// 之前整段都没有 CPD 产品，若填零，日后定标 CPD 判据时会把「没测」当成
+/// 「测了是零」统计进去，直接把判据往松了标。
 fn cpd_counts<S: Satellite>(
     chunk: &Chunk<S>,
     events: &[Event<S>],
     start: MissionElapsedTime<Gecam<S>>,
     stop: MissionElapsedTime<Gecam<S>>,
-) -> AcdCounts {
+) -> Option<AcdCounts> {
+    let cpd = chunk.cpd_file.as_ref()?;
     let (start, stop) = (start.met(), stop.met());
     let (before, after) = (start - CPD_BASELINE_SECONDS, stop + CPD_BASELINE_SECONDS);
 
@@ -171,17 +247,16 @@ fn cpd_counts<S: Satellite>(
     };
 
     let n = grd_within(start, stop);
-    AcdCounts {
+    Some(AcdCounts {
         n,
-        n_acd: chunk.cpd_file.count_within(start, stop),
-        n_acd_multi: chunk.cpd_file.count_multi_within(start, stop),
+        n_acd: cpd.count_within(start, stop),
+        n_acd_multi: cpd.count_multi_within(start, stop),
         // 基线取候选窗两侧，挖掉候选本身
         n_bg: grd_within(before, after).saturating_sub(n),
-        n_acd_bg: chunk
-            .cpd_file
+        n_acd_bg: cpd
             .count_within(before, after)
-            .saturating_sub(chunk.cpd_file.count_within(start, stop)),
-    }
+            .saturating_sub(cpd.count_within(start, stop)),
+    })
 }
 
 /// 候选窗与基线窗内逐路 GRD 的计数。
@@ -248,6 +323,83 @@ mod tests {
             evt_type: 1,
             flag: 0,
         }
+    }
+
+    fn gain_event(time: f64, detector_id: u8, gain_type: u8, channel: i16) -> Event<SatC> {
+        Event {
+            time: MissionElapsedTime::new(time),
+            channel,
+            detector_id,
+            gain_type,
+            dead_time: 4.0,
+            evt_type: 1,
+            flag: if gain_type == 0 { 0 } else { 10 },
+        }
+    }
+
+    #[test]
+    fn a_dual_gain_pair_counts_once_and_the_low_gain_row_is_the_one_kept() {
+        // 同一路探头、同一时戳的一高一低两条 = 同一个物理光子的两条记录
+        let mut events = vec![
+            gain_event(10.0, 3, 0, 440), // 高增益，接近饱和
+            gain_event(10.0, 3, 1, 377), // 低增益，有效测量
+        ];
+        assert_eq!(dedupe_gain_pairs(&mut events), 1);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].gain_type, 1);
+        assert_eq!(events[0].channel, 377);
+    }
+
+    #[test]
+    fn the_merge_order_does_not_change_which_row_survives() {
+        // 高增益那条先到还是后到，留下来的都得是低增益那条
+        for order in [[0usize, 1], [1, 0]] {
+            let rows = [gain_event(10.0, 3, 0, 440), gain_event(10.0, 3, 1, 377)];
+            let mut events = vec![rows[order[0]].clone(), rows[order[1]].clone()];
+            assert_eq!(dedupe_gain_pairs(&mut events), 1);
+            assert_eq!(events[0].gain_type, 1);
+        }
+    }
+
+    #[test]
+    fn same_timestamp_across_detectors_is_a_particle_not_a_duplicate_and_is_kept() {
+        // 带电粒子穿过整台仪器：各路同时响，这是要留下来给判据看的东西，
+        // 不能跟一路探头内部的双增益重复混为一谈
+        let mut events = vec![
+            gain_event(10.0, 1, 0, 300),
+            gain_event(10.0, 2, 0, 300),
+            gain_event(10.0, 7, 0, 300),
+        ];
+        assert_eq!(dedupe_gain_pairs(&mut events), 0);
+        assert_eq!(events.len(), 3);
+    }
+
+    #[test]
+    fn duplicates_are_merged_without_disturbing_the_time_order_around_them() {
+        let mut events = vec![
+            gain_event(9.0, 1, 0, 300),
+            gain_event(10.0, 2, 0, 440),
+            gain_event(10.0, 2, 1, 377),
+            gain_event(10.0, 5, 0, 300),
+            gain_event(11.0, 1, 0, 300),
+        ];
+        assert_eq!(dedupe_gain_pairs(&mut events), 1);
+        let times: Vec<f64> = events.iter().map(|e| e.time.met()).collect();
+        assert_eq!(times, vec![9.0, 10.0, 10.0, 11.0]);
+        assert!(events.windows(2).all(|w| w[0].time <= w[1].time));
+        // 10.0 那一串里留下的是探头 2 的低增益条和探头 5
+        assert_eq!(events[1].detector_id, 2);
+        assert_eq!(events[1].gain_type, 1);
+        assert_eq!(events[2].detector_id, 5);
+    }
+
+    #[test]
+    fn an_event_stream_without_duplicates_comes_back_untouched() {
+        let mut events = vec![event(9.0, 1), event(10.0, 2), event(11.0, 3)];
+        let before: Vec<f64> = events.iter().map(|e| e.time.met()).collect();
+        assert_eq!(dedupe_gain_pairs(&mut events), 0);
+        let after: Vec<f64> = events.iter().map(|e| e.time.met()).collect();
+        assert_eq!(before, after);
     }
 
     #[test]
