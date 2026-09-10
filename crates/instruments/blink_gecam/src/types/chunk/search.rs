@@ -1,7 +1,9 @@
 use blink_algorithms::detector_share::{MAX_DETECTOR_FRACTION, max_detector_fraction};
 use blink_algorithms::snapshot_stepping::{SearchConfig, search_new};
 use blink_core::traits::Event as _;
-use blink_core::types::{AcdCounts, Attitude, MissionElapsedTime, Position, Signal, Trajectory};
+use blink_core::types::{
+    AcdCounts, Attitude, DetectorCounts, MissionElapsedTime, Position, Signal, Trajectory,
+};
 use std::sync::atomic::Ordering;
 use uom::si::f64::*;
 
@@ -113,6 +115,12 @@ pub(super) fn search<S: Satellite>(chunk: &Chunk<S>) -> Vec<Signal<Event<S>>> {
                 attitude,
                 position: position.state,
                 acd: Some(cpd_counts(chunk, &events, candidate.start, candidate.stop)),
+                detectors: Some(detector_counts(
+                    chunk.evt_file.detector_count(),
+                    &events,
+                    candidate.start,
+                    candidate.stop,
+                )),
             })
         })
         .collect::<Vec<_>>();
@@ -173,5 +181,129 @@ fn cpd_counts<S: Satellite>(
             .cpd_file
             .count_within(before, after)
             .saturating_sub(chunk.cpd_file.count_within(start, stop)),
+    }
+}
+
+/// 候选窗与基线窗内逐路 GRD 的计数。
+///
+/// 这是方向分析唯一的原料，而且只能在这里取：候选表落盘后事例流就不在手边，
+/// 事后要补就得重跑全量（GECAM-C 5.8 TB、GECAM-B 110 TB）。所以哪怕方向分析
+/// 还没开工，这个向量也当场存下来。
+///
+/// 25 路 GRD 朝向各不相同，逐路计数的相对高低就编码了入射方向：CALDB 的
+/// `mc_rsp` 给了 401 个方向 × 25 路的蒙卡响应，拿这个向量去拟合就能定方向。
+/// 更省事的一问是"从天上来还是从地球来"——朝地那几路亮不亮，直接分开 TGF 与
+/// GRB、TGF 与 TEB，而这正是天格上卡住的那个问题。
+///
+/// 基线窗一并存，否则分不清"这一路亮"和"这一路本来就快"（各路本底率实测能
+/// 差一倍以上）。
+fn detector_counts<S: Satellite>(
+    detector_count: usize,
+    events: &[Event<S>],
+    start: MissionElapsedTime<Gecam<S>>,
+    stop: MissionElapsedTime<Gecam<S>>,
+) -> DetectorCounts {
+    let (start, stop) = (start.met(), stop.met());
+    let (before, after) = (start - CPD_BASELINE_SECONDS, stop + CPD_BASELINE_SECONDS);
+
+    // 探头号从 1 数起，下标 0 对应 EVENTS01
+    let mut window = vec![0u32; detector_count];
+    let mut baseline = vec![0u32; detector_count];
+    let lower = events.partition_point(|event| event.time().met() < before);
+    let upper = events.partition_point(|event| event.time().met() <= after);
+    for event in &events[lower..upper] {
+        let Some(slot) = (event.detector_id as usize).checked_sub(1) else {
+            continue;
+        };
+        if slot >= detector_count {
+            continue;
+        }
+        let time = event.time().met();
+        if time >= start && time <= stop {
+            window[slot] += 1;
+        } else {
+            baseline[slot] += 1;
+        }
+    }
+
+    DetectorCounts {
+        window,
+        baseline,
+        baseline_seconds: 2.0 * CPD_BASELINE_SECONDS,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::instrument::SatC;
+
+    fn event(time: f64, detector_id: u8) -> Event<SatC> {
+        Event {
+            time: MissionElapsedTime::new(time),
+            channel: 100,
+            detector_id,
+            gain_type: 0,
+            dead_time: 4.0,
+            evt_type: 1,
+            flag: 0,
+        }
+    }
+
+    #[test]
+    fn detector_ids_are_one_based_so_slot_zero_is_events01() {
+        let events = vec![event(10.0, 1), event(10.0, 3)];
+        let counts = detector_counts(
+            3,
+            &events,
+            MissionElapsedTime::new(9.9),
+            MissionElapsedTime::new(10.1),
+        );
+        assert_eq!(counts.window, vec![1, 0, 1]);
+    }
+
+    #[test]
+    fn events_outside_the_candidate_window_land_in_the_baseline() {
+        let events = vec![
+            event(9.0, 2),  // 基线：候选前
+            event(10.0, 2), // 候选窗内
+            event(11.0, 2), // 基线：候选后
+        ];
+        let counts = detector_counts(
+            2,
+            &events,
+            MissionElapsedTime::new(9.9),
+            MissionElapsedTime::new(10.1),
+        );
+        assert_eq!(counts.window, vec![0, 1]);
+        assert_eq!(counts.baseline, vec![0, 2]);
+        assert_eq!(counts.baseline_seconds, 2.0 * CPD_BASELINE_SECONDS);
+    }
+
+    #[test]
+    fn events_beyond_the_baseline_window_are_not_counted_at_all() {
+        // 基线半宽 1 s，±5 s 的事例既不算窗内也不算基线
+        let events = vec![event(5.0, 1), event(10.0, 1), event(15.0, 1)];
+        let counts = detector_counts(
+            1,
+            &events,
+            MissionElapsedTime::new(9.9),
+            MissionElapsedTime::new(10.1),
+        );
+        assert_eq!(counts.window, vec![1]);
+        assert_eq!(counts.baseline, vec![0]);
+    }
+
+    #[test]
+    fn a_detector_id_out_of_range_is_skipped_rather_than_panicking() {
+        // 探头数由文件里的 EVENTS 表数决定；万一对不上也不能越界
+        let events = vec![event(10.0, 1), event(10.0, 99)];
+        let counts = detector_counts(
+            2,
+            &events,
+            MissionElapsedTime::new(9.9),
+            MissionElapsedTime::new(10.1),
+        );
+        assert_eq!(counts.window, vec![1, 0]);
     }
 }

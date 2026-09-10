@@ -173,6 +173,9 @@ pub(super) fn search(chunk: &Chunk) -> Vec<Signal<Event>> {
                 position: position.state,
                 // GBM 没有反符合探测器
                 acd: None,
+                // 暂未填：GBM 14 路 NaI 本可定向，但全量正在跑，不中途改产物内容
+                // ——见 blink_core::DetectorCounts
+                detectors: None,
             })
         })
         .collect::<Vec<_>>();

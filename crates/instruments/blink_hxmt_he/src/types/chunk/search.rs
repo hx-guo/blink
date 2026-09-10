@@ -99,6 +99,8 @@ pub fn search(chunk: &Chunk) -> Vec<Signal<Event>> {
                     candidate.start.met(),
                     candidate.stop.met(),
                 )),
+                // 暂未填：方向分析没在 HXMT 上立项，见 blink_core::DetectorCounts
+                detectors: None,
             })
         })
         .collect::<Vec<_>>();

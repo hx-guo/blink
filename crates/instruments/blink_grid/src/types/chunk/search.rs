@@ -260,6 +260,8 @@ pub(super) fn search<S: Satellite>(chunk: &Chunk<S>) -> Vec<Signal<Event<S>>> {
                 position,
                 // 天格没有反符合探测器
                 acd: None,
+                // 暂未填：天格 4 路，方向分析的收益还没评估，见 blink_core::DetectorCounts
+                detectors: None,
             })
         })
         .collect::<Vec<_>>();

@@ -22,6 +22,7 @@ plt.rcParams.update({
 })
 SHORT_US = 500.0
 RED, BLUE, GREY = "#c53030", "#2b6cb0", "0.55"
+SAT_COLORS = {"GRID-02": "#d97706", "GRID-03B": "#c53030", "GRID-04": "#2b6cb0", "GRID-07": "#2f855a"}
 POLE_LAT, POLE_LON = np.radians(80.7), np.radians(-72.7)
 
 
@@ -93,28 +94,52 @@ def fig_two_populations(d, out):
 
 
 def fig_map(d, out):
-    """图 2：候选的地理分布。
+    """图 2：候选的地理分布，颜色分卫星、形状分类别。
 
     足点检验（软暴是不是 TGF 的电子束）暂不进讲图，分析还没定论；做法与数字留在
     `crates/instruments/blink_grid/OPEN-QUESTIONS.md` 和 `scripts/grid_footpoints.py`。
     """
-    s, l, a = d["short"], ~d["short"], d["assoc"]
-    fig = plt.figure(figsize=(14, 6.4))
+    from matplotlib.lines import Line2D
+
+    short, a = d["short"], d["assoc"]
+    fig = plt.figure(figsize=(14, 6.8))
     ax = fig.add_subplot(1, 1, 1, projection=ccrs.PlateCarree())
     span = min(90, np.ceil(np.abs(d["lat"]).max()) + 4)
     ax.set_extent([-180, 180, -span, span], crs=ccrs.PlateCarree())
     ax.add_feature(cfeature.LAND, facecolor="0.94")
     ax.add_feature(cfeature.COASTLINE, lw=0.5, edgecolor="0.45")
     ax.gridlines(draw_labels=False, lw=0.3, color="0.9")
-    ax.scatter(d["lon"][l], d["lat"][l], s=52, c=BLUE, marker="s", lw=0.4, edgecolor="k", alpha=0.8,
-               transform=ccrs.PlateCarree(), zorder=4, label="毫秒级软暴 (%d)" % l.sum())
-    ax.scatter(d["lon"][s & ~a], d["lat"][s & ~a], s=48, c="0.75", lw=0.4, edgecolor="0.4",
-               transform=ccrs.PlateCarree(), zorder=5, label="短硬暴，未关联 (%d)" % int((s & ~a).sum()))
-    ax.scatter(d["lon"][a], d["lat"][a], s=150, c=RED, marker="*", lw=0.6, edgecolor="k",
-               transform=ccrs.PlateCarree(), zorder=6, label="闪电证实的 TGF (%d)" % a.sum())
-    ax.legend(loc="lower center", bbox_to_anchor=(0.5, -0.13), ncol=3, frameon=False, fontsize=13)
-    ax.set_title("天格候选的地理分布：短硬暴落在低纬雷暴区，毫秒级软暴落在高磁纬海域",
-                 fontsize=17, pad=12)
+
+    # 形状分类别、颜色分卫星：短硬暴只出在 GRID-03B，这一点在图上要一眼看得出来
+    kinds = [(~short, "s", 54, "毫秒级软暴"),
+             (short & ~a, "o", 54, "短硬暴，未关联闪电"),
+             (short & a, "*", 190, "短硬暴，闪电证实")]
+    for sat in SAT_COLORS:
+        for m, marker, size, _ in kinds:
+            sel = m & (d["sat"] == sat)
+            if not sel.any():
+                continue
+            ax.scatter(d["lon"][sel], d["lat"][sel], s=size, marker=marker, c=SAT_COLORS[sat],
+                       lw=0.5, edgecolor="k", alpha=0.9, transform=ccrs.PlateCarree(),
+                       zorder=6 if marker == "*" else 4)
+
+    sat_handles = [Line2D([], [], marker="o", ls="", ms=10, mfc=c, mec="k", mew=0.5,
+                          label="%s (%d)" % (sat, int((d["sat"] == sat).sum())))
+                   for sat, c in SAT_COLORS.items() if (d["sat"] == sat).any()]
+    kind_handles = [Line2D([], [], marker=marker, ls="", ms=13 if marker == "*" else 9,
+                           mfc="0.75", mec="k", mew=0.5, label="%s (%d)" % (name, int(m.sum())))
+                    for m, marker, _, name in kinds]
+    leg = ax.legend(handles=sat_handles, loc="upper left", bbox_to_anchor=(0.0, -0.04),
+                    ncol=2, frameon=False, fontsize=13, title="卫星", alignment="left")
+    leg.get_title().set_fontsize(13)
+    ax.add_artist(leg)
+    leg2 = ax.legend(handles=kind_handles, loc="upper right", bbox_to_anchor=(1.0, -0.04),
+                     ncol=1, frameon=False, fontsize=13, title="类别", alignment="left")
+    leg2.get_title().set_fontsize(13)
+
+    ax.set_title("天格候选的地理分布：短硬暴在低纬雷暴区、软暴在高磁纬海域\n"
+                 "29 个短硬暴与 7 个闪电证实的 TGF 全部来自 GRID-03B",
+                 fontsize=16, pad=12, linespacing=1.5)
     fig.savefig(out, dpi=160, bbox_inches="tight"); print("wrote", out)
 
 

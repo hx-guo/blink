@@ -119,6 +119,8 @@ pub(super) fn search(chunk: &Chunk) -> Vec<Signal<Event>> {
                 // 事例表里有一列 ANTI_COIN，但它的语义未经确认，尚未接入
                 // —— 见本 crate 的 `OPEN-QUESTIONS.md`。
                 acd: None,
+                // 暂未填：GRM 3 路，方向分析的收益还没评估，见 blink_core::DetectorCounts
+                detectors: None,
             })
         })
         .collect::<Vec<_>>();
