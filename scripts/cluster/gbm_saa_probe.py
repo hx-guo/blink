@@ -6,7 +6,11 @@ D = "/hxmtfs/data/Fermi_GBM/2019/01/01/current"
 DETS = ["n0","n1","n2","n3","n4","n5","n6","n7","n8","n9","na","nb","b0","b1"]
 REF = datetime(2001, 1, 1, tzinfo=timezone.utc)
 def met(iso):
-    b = iso.rstrip("Z"); h, f = b.split("."); return (datetime.strptime(h + "." + (f + "000000")[:6], "%Y-%m-%dT%H:%M:%S.%f").replace(tzinfo=timezone.utc) - REF).total_seconds() + 5.0  # 2019 年 GBM MET 比 UTC 多 5 个闰秒
+    # 小数秒不能截到微秒：候选窗只有几微秒宽，截断会把边界上的整簇事例挡在窗外。
+    # 小数位数也不固定（serde 会截掉末尾的零），只能按小数点切、整段转浮点。
+    b = iso.rstrip("Z"); h, _, f = b.partition(".")
+    t = datetime.strptime(h, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+    return (t - REF).total_seconds() + (float("0." + f) if f else 0.0) + 5.0  # 2019 年 GBM MET 比 UTC 多 5 个闰秒
 # poshist SAA 段
 ph = sorted(glob.glob("%s/glg_poshist_all_190101_v*.fit*" % D))[-1]
 with fits.open(ph) as h:

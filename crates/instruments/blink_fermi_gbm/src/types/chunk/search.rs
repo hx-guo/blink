@@ -73,6 +73,7 @@ pub(super) fn search(chunk: &Chunk) -> Vec<Signal<Event>> {
                     time: MissionElapsedTime::new(*time),
                     channel: *channel,
                     detector: file.detector,
+                    unit: file.unit,
                     group,
                 })
                 .filter(Event::keep),
@@ -192,9 +193,7 @@ pub(super) fn search(chunk: &Chunk) -> Vec<Signal<Event>> {
     chunk
         .dropped_simultaneous
         .store(n_simultaneous, Ordering::Relaxed);
-    chunk
-        .events_outside_gti
-        .store(n_outside, Ordering::Relaxed);
+    chunk.events_outside_gti.store(n_outside, Ordering::Relaxed);
 
     signals
 }
@@ -211,9 +210,28 @@ mod tests {
                 time: MissionElapsedTime::new(*time),
                 channel: 40,
                 detector: Detector::Nai,
+                unit: 0,
                 group: 0,
             })
             .collect()
+    }
+
+    #[test]
+    fn every_archive_detector_name_has_a_unit_index() {
+        // 逐路计数的下标就是这个，认不出代号会在载入时 panic，
+        // 所以归档里出现的每个代号都必须在表里。
+        for (i, name) in Detector::UNIT_NAMES.iter().enumerate() {
+            assert_eq!(Detector::unit_index(name), Some(i as u8), "{name}");
+        }
+        for detector in Detector::ALL {
+            for name in detector.names() {
+                assert!(
+                    Detector::unit_index(name).is_some(),
+                    "{name} 不在 UNIT_NAMES 里"
+                );
+            }
+        }
+        assert_eq!(Detector::unit_index("n12"), None);
     }
 
     fn fraction(times: &[f64]) -> f64 {

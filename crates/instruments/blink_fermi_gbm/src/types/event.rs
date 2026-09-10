@@ -8,6 +8,12 @@ pub struct Event {
     pub time: MissionElapsedTime<FermiGbm>,
     pub channel: i16,
     pub detector: Detector,
+    /// 14 路里的哪一路，下标按 `Detector::UNIT_NAMES`。
+    ///
+    /// `detector` 只到类型（12 个 NaI 合成一个 `Nai`），够搜索分组用，但
+    /// 定方向要的是逐路——12 个 NaI 朝向各不相同，逐路计数的相对高低就编码
+    /// 了入射方向。见 `chunk::search::detector_counts`。
+    pub unit: u8,
     /// 本事例所属的搜索分组下标。由 `Chunk` 在载入时按这一小时**实际存在**的
     /// 探测器类型连续编号——只有 BGO 的时段编成一组（下标恒为 0），NaI 与 BGO
     /// 都在的时段编成两组。这样 Bonferroni 的试验次数惩罚才跟真实组数一致，
