@@ -98,6 +98,7 @@ dependencies = [
  "blink_algorithms",
  "blink_core",
  "blink_fermi_gbm",
+ "blink_gecam",
  "blink_grid",
  "blink_hxmt_he",
  "blink_search",
@@ -133,6 +134,18 @@ dependencies = [
 
 [[package]]
 name = "blink_fermi_gbm"
+version = "0.1.0"
+dependencies = [
+ "blink_algorithms",
+ "blink_core",
+ "chrono",
+ "fitsio",
+ "serde",
+ "uom",
+]
+
+[[package]]
+name = "blink_gecam"
 version = "0.1.0"
 dependencies = [
  "blink_algorithms",

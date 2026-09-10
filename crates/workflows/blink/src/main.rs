@@ -176,6 +176,15 @@ fn main() {
                 Instrument::Grid07 => blink_search::search_range::<blink_grid::types::Grid07>(
                     start, end, workers, worker,
                 ),
+                Instrument::GecamA => blink_search::search_range::<blink_gecam::types::GecamA>(
+                    start, end, workers, worker,
+                ),
+                Instrument::GecamB => blink_search::search_range::<blink_gecam::types::GecamB>(
+                    start, end, workers, worker,
+                ),
+                Instrument::GecamC => blink_search::search_range::<blink_gecam::types::GecamC>(
+                    start, end, workers, worker,
+                ),
             }
         }
         TopCommands::Wwlln {
@@ -189,6 +198,9 @@ fn main() {
             Instrument::Grid03b => blink_wwlln::run::<blink_grid::types::Grid03B>(window_ms),
             Instrument::Grid04 => blink_wwlln::run::<blink_grid::types::Grid04>(window_ms),
             Instrument::Grid07 => blink_wwlln::run::<blink_grid::types::Grid07>(window_ms),
+            Instrument::GecamA => blink_wwlln::run::<blink_gecam::types::GecamA>(window_ms),
+            Instrument::GecamB => blink_wwlln::run::<blink_gecam::types::GecamB>(window_ms),
+            Instrument::GecamC => blink_wwlln::run::<blink_gecam::types::GecamC>(window_ms),
         },
         TopCommands::AcdAudit { list, out, scint } => {
             commands::acd_audit::cmd_acd_audit(&list, &out, &scint);
