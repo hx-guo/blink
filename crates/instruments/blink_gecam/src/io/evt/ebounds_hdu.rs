@@ -20,8 +20,20 @@ pub const OVERFLOW_CHANNEL: i16 = 448;
 /// 能量梯的头尾，用来核对 EBOUNDS 是不是我们标定过的那一张表。
 const LADDER_MIN_KEV: f64 = 2.0;
 const LADDER_MAX_KEV: f64 = 10053.5;
-/// 溢出道的 `E_MAX` 哨兵值。
+/// 溢出道的 `E_MAX` 哨兵值，两个版本都认。
+///
+/// 标定库的生成器在 2022-01-14 改过一次：之前最后 50 道的上下阈一律填 0，
+/// 之后下阈改成 4096 道对应的能量、上阈改成 20 MeV。GECAM-B/C 跟进了新版，
+/// GECAM-A 的 `pi/` 只有 2023-01-10 那一版、一直在用旧生成器，所以 A 星
+/// **全部** 4,609 小时的 ch448 `E_MAX` 都是 0.0（实测 9 个 epoch 横跨
+/// 2022-10 到 2026-06，24 个文件无一例外）。0.0 和 20000 是同一个约定的
+/// 两个版本号，不是哪一个填错了，所以两者都放行。
+///
+/// 放行的只有这一条。道 0..447 那把梯子的连续性、头尾、以及 40 keV 落在
+/// ch54，A 星与 B 星逐道完全一致、全程都过——那几条才是真正护住能阈的闸，
+/// 一条都没有放松。
 const OVERFLOW_MAX_KEV: f64 = 20000.0;
+const OVERFLOW_MAX_KEV_LEGACY: f64 = 0.0;
 
 pub(super) struct EboundsHdu {
     e_min: Vec<f32>,
@@ -66,11 +78,16 @@ impl EboundsHdu {
                 )));
             }
         }
-        // 溢出道确实是溢出道
-        if (self.e_max[ladder] as f64 - OVERFLOW_MAX_KEV).abs() > 1.0 {
+        // 溢出道确实是溢出道：它不能是能量梯的延续。梯子在 ch447 收在
+        // 10053.5 keV，接着往下走一道该是 10190 上下，两个哨兵值离得都很远。
+        let overflow = self.e_max[ladder] as f64;
+        let sentinel = (overflow - OVERFLOW_MAX_KEV).abs() <= 1.0
+            || (overflow - OVERFLOW_MAX_KEV_LEGACY).abs() <= 1.0;
+        if !sentinel {
             return Err(Error::InvalidData(format!(
-                "GECAM ch{ladder} 的 E_MAX 是 {:.1} keV，不是溢出道该有的 {OVERFLOW_MAX_KEV:.0}",
-                self.e_max[ladder]
+                "GECAM ch{ladder} 的 E_MAX 是 {overflow:.1} keV，\
+                 不是溢出道该有的 {OVERFLOW_MAX_KEV:.0}（新生成器）\
+                 或 {OVERFLOW_MAX_KEV_LEGACY:.0}（2022-01-14 之前的旧生成器）"
             )));
         }
         Ok(())
@@ -127,6 +144,29 @@ mod tests {
         let mut broken = ebounds(LADDER_MAX_KEV);
         broken.e_min[200] *= 1.5;
         assert!(broken.verify().is_err());
+    }
+
+    /// GECAM-A 的标定库停在 2022-01-14 之前的生成器上，最后 50 道填 0 而不是
+    /// 20 MeV。梯子本身逐道与 B 星一致，所以这张表要照收。
+    #[test]
+    fn the_legacy_overflow_sentinel_is_accepted() {
+        let mut legacy = ebounds(LADDER_MAX_KEV);
+        for k in OVERFLOW_CHANNEL as usize..legacy.e_max.len() {
+            legacy.e_min[k] = 0.0;
+            legacy.e_max[k] = 0.0;
+        }
+        assert!(legacy.verify().is_ok());
+    }
+
+    /// 放行 0.0 不能顺带放行"溢出道其实是梯子的延续"这种表——那种表里道号
+    /// 的能量含义就变了，正是这条校验要挡的东西。
+    #[test]
+    fn an_overflow_row_that_continues_the_ladder_is_still_rejected() {
+        let mut continued = ebounds(LADDER_MAX_KEV);
+        let ladder = OVERFLOW_CHANNEL as usize;
+        continued.e_min[ladder] = continued.e_max[ladder - 1];
+        continued.e_max[ladder] = continued.e_max[ladder - 1] * 1.0134;
+        assert!(continued.verify().is_err());
     }
 
     #[test]
