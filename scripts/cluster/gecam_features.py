@@ -34,11 +34,19 @@ CPD_HALF_WIDTHS = (1e-5, 1e-4, 1e-3, 1e-2)
 
 
 def met(iso, satellite):
+    """ISO 时刻折成 MET。
+
+    小数秒必须整取，不能截到微秒。GECAM 的时戳分辨率是 0.03 µs，候选窗最短
+    也是 0.03 µs，`datetime` 只到微秒，截断一次的误差就能有窗宽的几十倍——
+    窗口整个错位，窗内事例捞不全（实测截断版重算的计数 99.2% 少于搜索报的，
+    1–10 µs 的窗只捞回 62%）。所以整秒部分交给 `datetime`，小数部分单独按
+    浮点加回去。
+    """
     body = iso.rstrip("Z")
-    head, frac = body.split(".")
-    stamp = dt.datetime.strptime(head + "." + (frac + "000000")[:6], "%Y-%m-%dT%H:%M:%S.%f")
+    head, _, frac = body.partition(".")
+    stamp = dt.datetime.strptime(head, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=dt.timezone.utc)
     ref = dt.datetime(*EPOCH[satellite], tzinfo=dt.timezone.utc)
-    return (stamp.replace(tzinfo=dt.timezone.utc) - ref).total_seconds()
+    return (stamp - ref).total_seconds() + (float("0." + frac) if frac else 0.0)
 
 
 def hour_file(satellite, iso, kind):
@@ -85,8 +93,8 @@ def main():
     writer = csv.writer(open(out_path, "w", newline=""))
     writer.writerow(
         ["start", "fa", "count", "mean", "bin_us", "lon", "lat", "n_core", "n_det_hit",
-         "det_frac_max", "max_mult", "simul_frac", "min_dt_us", "pi_core_med", "pi_bkg_med",
-         "pi_ratio", "rate_win"]
+         "det_frac_max", "max_mult", "simul_frac", "n_multiplets", "multiplet_frac",
+         "min_dt_us", "pi_core_med", "pi_bkg_med", "pi_ratio", "rate_win"]
         + [f"cpd_{int(w * 1e6)}us" for w in CPD_HALF_WIDTHS]
     )
 
@@ -112,9 +120,15 @@ def main():
         n_core = int(core.sum())
         if n_core == 0:
             continue
-        # 同一时间戳上最长的一串：带电粒子穿过整台仪器时各路同时响
+        # 同戳簇。天格只有 4 路，一个粒子把 4 路全点亮，"最长一串"就够用；GECAM
+        # 有 12 路，一个候选窗里往往有好几个各自独立的小簇（实测某候选在
+        # 58.71 µs 上两个、58.81 µs 上两个），最长串只有 2，除以 8 就成了 0.25，
+        # 看着像"不同戳"。所以要看的是**参与任何同戳簇的事例占多少**，
+        # 而不是最长的那一串。
         _, multiplicity = np.unique(time[core], return_counts=True)
         max_mult = int(multiplicity.max())
+        n_multiplets = int((multiplicity >= 2).sum())
+        multiplet_frac = float(multiplicity[multiplicity >= 2].sum()) / n_core
         _, det_counts = np.unique(detector[core], return_counts=True)
         gaps = np.diff(time[core])
         positive = gaps[gaps > 0]
@@ -138,7 +152,8 @@ def main():
              f"{signal['mean']:.5f}", f"{signal['bin_size_best'] * 1e6:.2f}",
              f"{signal['position']['longitude']:.3f}", f"{signal['position']['latitude']:.3f}",
              n_core, len(det_counts), f"{det_counts.max() / n_core:.3f}", max_mult,
-             f"{max_mult / n_core:.3f}", f"{min_dt_us:.3f}", f"{pi_core:.0f}",
+             f"{max_mult / n_core:.3f}", n_multiplets, f"{multiplet_frac:.3f}",
+             f"{min_dt_us:.3f}", f"{pi_core:.0f}",
              f"{pi_bkg:.0f}" if np.isfinite(pi_bkg) else "",
              f"{pi_core / pi_bkg:.3f}" if np.isfinite(pi_bkg) and pi_bkg > 0 else "",
              f"{window.sum() / (1.0 + signal['bin_size_best']):.0f}"]
