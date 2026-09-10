@@ -170,79 +170,97 @@ pub(super) fn search<S: Satellite>(chunk: &Chunk<S>) -> Vec<Signal<Event<S>>> {
     signals
 }
 
-/// 双增益重复记录去重：同一路探头、同一时戳的两条并成一条。返回并掉的条数。
+/// 双增益重复记录去重：同一路探头在死时间内的一高一低两条并成一条，保留低增益
+/// 那条。返回并掉的条数。
 ///
 /// **同一个物理光子会被 ADC 的两个增益支路各写一行。** 实测 GECAM-C
 /// 2023-06-15 12h 全 12 路：同探头同时戳的事例对占原始事例 6.635%，这些对
 /// **100%** 是 `GAIN_TYPE` 一高一低、`FLAG` 一个 0 一个 10、`EVT_PAIR`
-/// 两端都为真，而 PI 相同的占 0%。所以它们不是两个光子，是一个光子的两条
-/// 记录。GECAM-A 2024-01-11 独立复现（123 万对），并排除了「其实是同探头
-/// 29.8 ns 内的两个独立事例」：按单路 748 c/s 算偶然同戳对的期望是 11 对／
-/// 路／过境，实测 49,214 对／路，**99.98% 是真双增益读出**。
+/// 两端都为真，而 PI 相同的占 0%。GECAM-A 2024-01-11 独立复现（123 万对），
+/// 并排除了「其实是同探头 30 ns 内的两个独立事例」：按单路 748 c/s 算偶然同戳
+/// 对的期望是 11 对／路／过境，实测 49,214 对／路，**99.98% 是真双增益读出**。
 ///
-/// 多数时候高增益那条已经饱和进溢出道、被 `Event::keep` 的 `PI < 448` 挡掉，
-/// 一个物理事例只剩一条（占 98.8%）。但剩下的 1.2% 两条都过了准入，于是
-/// **约 3.25% 的准入后计数是重复计数**——而候选窗内这个比例是 6.82%，
-/// 富集 2.1 倍，**50.4% 的候选窗里至少含一对重复**。两条记录的时戳完全相同，
-/// 泊松独立性直接破掉，跟带电粒子跨探头同时点亮是同一类机制，只是发生在
-/// 一路探头内部。粗估反标定表明约 28% 的候选是这么造出来的。
+/// **判据是死时间，不是时戳相等。** 两支的时戳不一定完全相同——实测 GECAM-A
+/// 上有整整一批差 **89 ns 和 119 ns（正好 3 个和 4 个量化步）**，按「时戳相等」
+/// 合并会**系统性漏掉 15–16%**（2024-01-11 h03 双增益重复总量 11.63%，时戳相等
+/// 只抓到 85%；2026-06-01 h21 总量 6.97%，抓到 84%）。这批残余尤其有害：它们
+/// 绝大多数落在 89–119 ns，而 GECAM-A 候选窗的 `bin_us` 中位是 0.15 µs = 150 ns，
+/// **整对落在候选窗内、把计数抬高 1，而且因为时戳不同，同戳类判据完全看不见**
+/// ——实测 74,012 个候选里 51.55% 至少含一对。
+///
+/// 死时间是硬物理约束，不是经验阈值：**同一路探头在死时间内不可能读出两个独立
+/// 光子**。GECAM-A 实测事例间隔直方图的硬边沿就在 4 µs（0.2–3.9 µs 是 5–15
+/// 计数/格的近零区，3.9 µs 起跳到 25–75 并维持），与 `DEAD_TIME` 列的取值 4
+/// 对上；所以这里直接用事例自带的 `dead_time`（µs），不写死常数。
+/// **不能拿最小正间隔去推死时间**——实测最小正间隔是 30 ns，比死时间小 130 倍，
+/// 那是偶发毛刺，死时间要看直方图的硬边沿。
+///
+/// **只并一高一低的对。** 死时间内的同档对（GECAM-A 实测占 0.18%）不并：它们
+/// 可能是真的读出异常，合并了会把问题掩盖掉。
 ///
 /// **保留低增益那条，理由是量程不是饱和。** 「高增益支路会饱和」这个先前的
-/// 说法**实测不成立**：GECAM-A 2024-01-11 的 123 万对里，高增益条
-/// `PI >= 448` 的占 **0.00%**。真正的理由是两档的量程差一个数量级——低增益
-/// 支路的高能端撑到 **ch≈379（约 4.0 MeV）**，高增益支路在 **ch≈157
-/// （约 215 keV）** 就到顶了，**留高增益条会把 215 keV 以上的信息整段丢掉**。
+/// 说法**实测不成立**：GECAM-A 的 123 万对里高增益条 `PI >= 448` 占 **0.00%**。
+/// 真正的理由是两档量程差一个数量级——低增益支路撑到 **ch≈379（约 4.0 MeV）**，
+/// 高增益支路在 **ch≈157（约 215 keV）** 就到顶，**留高增益条会把 215 keV 以上
+/// 的信息整段丢掉**。两档也不是同一把尺子：同一对里 PI 完全相同的只有 3.06%，
+/// 高−低的差中位 −8 道、按能量分段发散（ch200–300 段 −64 道），所以留哪条
+/// **对计数可忽略、对能量不可忽略**。
 ///
-/// **两档不是同一把尺子，而且偏差随能量发散。** 同一对里 PI 完全相同的只有
-/// 3.06%，高−低的差中位 −8 道、5–95% 为 −46..+9；按低增益道号分段，
-/// ch54–100 段差中位 +2、ch100–200 段 −13、ch200–300 段 −64。所以留哪条
-/// **对计数可忽略、对能量不可忽略**：会因为留哪条而跨过 `MIN_CHANNEL` 的对
-/// 占 0.18%（折到全部事例约 0.02%），但道号差中位 −8 道 ≈ 11% 能量。
-///
-/// 判据用「同探头同时戳」这个实测事实，不用 `EVT_PAIR` 那一列：实测
-/// `EVT_PAIR` 为真的事例占 19.9%，而同戳对只占 7.9%，两者对不上（伴侣可能
-/// 被上游过滤掉、或差一个时戳格），语义没核实清楚之前不拿它当判据。
-///
-/// 输入必须已按时间排好。同一时戳的一串通常只有几条，最多不过探头路数，
-/// 所以串内 O(k²) 的比对可以忽略。
+/// 输入必须已按时间排好。死时间窗内的事例数很少（GECAM-A 全仪器约 18.7 kc/s，
+/// 4 µs 里期望 0.075 个），所以窗内线性扫的代价可以忽略。
 fn dedupe_gain_pairs<S: Satellite>(events: &mut Vec<Event<S>>) -> usize {
-    let mut keep_run: Vec<bool> = Vec::with_capacity(64);
-    let mut write = 0usize;
-    let mut merged = 0usize;
-    let mut start = 0usize;
+    /// 死时间读不出来时退回「时戳完全相等」——保守，宁可漏并不可错并。
+    const NO_DEAD_TIME: f64 = 0.0;
 
-    while start < events.len() {
-        let mut stop = start + 1;
-        while stop < events.len() && events[stop].time == events[start].time {
-            stop += 1;
-        }
-
-        keep_run.clear();
-        for a in start..stop {
-            // 同一路探头在这一串里另有一条时就并掉：留低增益（`gain_type` 大）
-            // 那条，两条增益档相同时留先出现的，规则与归并顺序无关
-            let superseded = (start..stop).any(|b| {
-                b != a
-                    && events[b].detector_id == events[a].detector_id
-                    && (events[b].gain_type > events[a].gain_type
-                        || (events[b].gain_type == events[a].gain_type && b < a))
-            });
-            keep_run.push(!superseded);
-        }
-
-        // 决定已经算完，往前挪不会影响本串的判断；`write <= start + offset`
-        // 恒成立，且 swap 只碰更靠前的位置，后面待挪的元素动不到
-        for (offset, keep) in keep_run.iter().enumerate() {
-            if *keep {
-                events.swap(write, start + offset);
-                write += 1;
-            } else {
-                merged += 1;
-            }
-        }
-        start = stop;
+    #[derive(Clone, Copy, PartialEq)]
+    enum State {
+        Alive,
+        Paired,
+        Dropped,
     }
 
+    let mut state = vec![State::Alive; events.len()];
+    let mut merged = 0usize;
+
+    for a in 0..events.len() {
+        if state[a] != State::Alive {
+            continue;
+        }
+        let dead_time = if events[a].dead_time.is_finite() && events[a].dead_time > 0.0 {
+            f64::from(events[a].dead_time) * 1e-6
+        } else {
+            NO_DEAD_TIME
+        };
+        let deadline = events[a].time.met() + dead_time;
+
+        let mut b = a + 1;
+        while b < events.len() && events[b].time.met() <= deadline {
+            if state[b] == State::Alive
+                && events[b].detector_id == events[a].detector_id
+                // 一高一低才是双增益对；同档的不并，见上面的注释
+                && events[b].gain_type != events[a].gain_type
+            {
+                let (keep, discard) = if events[a].gain_type > events[b].gain_type {
+                    (a, b)
+                } else {
+                    (b, a)
+                };
+                state[keep] = State::Paired;
+                state[discard] = State::Dropped;
+                merged += 1;
+                break;
+            }
+            b += 1;
+        }
+    }
+
+    let mut write = 0usize;
+    for index in 0..events.len() {
+        if state[index] != State::Dropped {
+            events.swap(write, index);
+            write += 1;
+        }
+    }
     events.truncate(write);
     merged
 }
@@ -419,6 +437,61 @@ mod tests {
             assert_eq!(dedupe_gain_pairs(&mut events), 1);
             assert_eq!(events[0].gain_type, 1);
         }
+    }
+
+    /// 两支的时戳不一定完全相同：实测有整整一批差 89 ns 和 119 ns（3 个和 4 个
+    /// 量化步）。按「时戳相等」合并会漏掉 15–16%，而这批恰好整对落在候选窗内。
+    #[test]
+    fn a_pair_a_few_quantisation_steps_apart_is_still_one_photon() {
+        let mut events = vec![
+            gain_event(10.0, 3, 0, 300),
+            gain_event(10.0 + 89e-9, 3, 1, 288),
+        ];
+        assert_eq!(dedupe_gain_pairs(&mut events), 1);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].gain_type, 1);
+    }
+
+    /// 死时间之外的同探头两条是两个光子，不能并——死时间是这条判据的全部依据。
+    #[test]
+    fn two_events_further_apart_than_the_dead_time_are_two_photons() {
+        // dead_time 是 4 µs，隔 5 µs 的一高一低是两次独立读出
+        let mut events = vec![
+            gain_event(10.0, 3, 0, 300),
+            gain_event(10.000005, 3, 1, 288),
+        ];
+        assert_eq!(dedupe_gain_pairs(&mut events), 0);
+        assert_eq!(events.len(), 2);
+    }
+
+    /// 死时间内的同档对不并：它们可能是真的读出异常，并掉会把问题掩盖。
+    #[test]
+    fn a_pair_in_the_same_gain_branch_is_left_alone() {
+        let mut events = vec![
+            gain_event(10.0, 3, 0, 300),
+            gain_event(10.0 + 89e-9, 3, 0, 288),
+        ];
+        assert_eq!(dedupe_gain_pairs(&mut events), 0);
+        assert_eq!(events.len(), 2);
+    }
+
+    /// 死时间读不出来时退回「时戳完全相等」——保守，宁可漏并不可错并。
+    #[test]
+    fn without_a_dead_time_only_identical_timestamps_are_merged() {
+        let mut apart = vec![
+            gain_event(10.0, 3, 0, 300),
+            gain_event(10.0 + 89e-9, 3, 1, 288),
+        ];
+        for event in &mut apart {
+            event.dead_time = 0.0;
+        }
+        assert_eq!(dedupe_gain_pairs(&mut apart), 0);
+
+        let mut together = vec![gain_event(10.0, 3, 0, 300), gain_event(10.0, 3, 1, 288)];
+        for event in &mut together {
+            event.dead_time = 0.0;
+        }
+        assert_eq!(dedupe_gain_pairs(&mut together), 1);
     }
 
     #[test]
