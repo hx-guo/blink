@@ -20,7 +20,13 @@ pub struct Chunk<S: Satellite> {
     pub span: [MissionElapsedTime<Gecam<S>>; 2],
     pub evt_file: EvtFile<S>,
     /// 带电粒子探测器。只统计不否决——判据还没定标，见 `search`。
-    pub cpd_file: CpdFile<S>,
+    ///
+    /// **可以为空。** GECAM-A 在 2025-03-12 之前根本没有 CPD 事例产品
+    /// （`CPD_evt` 目录都不存在），而那正是 A 星唯一落在 WWLLN 覆盖内的
+    /// 那段。缺 CPD 时 GRD 照常搜，`Signal::acd` 留 `None`——**不是全零**，
+    /// 「这一小时没有 CPD 数据」和「符合数为零」必须能分开，否则 CPD 判据
+    /// 定标时会把空值当成物理结论统计进去。
+    pub cpd_file: Option<CpdFile<S>>,
     pub posatt_file: PosAttFile,
     /// 峰值时刻取不到位置、只能丢掉的候选数，见 `search`。
     pub(super) dropped_no_ephemeris: AtomicUsize,
@@ -30,6 +36,8 @@ pub struct Chunk<S: Satellite> {
     pub(super) dropped_single_detector: AtomicUsize,
     /// 落在 GTI 之外、搜索前就丢掉的事例数。
     pub(super) events_outside_gti: AtomicUsize,
+    /// 双增益重复记录里被并掉的那一条，见 `search::dedupe_gain_pairs`。
+    pub(super) merged_gain_duplicates: AtomicUsize,
 }
 
 impl<S: Satellite> blink_core::traits::Chunk for Chunk<S> {
@@ -75,7 +83,11 @@ impl<S: Satellite> blink_core::traits::Chunk for Chunk<S> {
         let reversals = self.evt_file.time_reversals();
         let mut diagnostics = vec![
             ("n_detectors", self.evt_file.detector_count() as f64),
-            ("n_cpd_detectors", self.cpd_file.detector_count() as f64),
+            // 0 就是「这一小时没有 CPD 文件」，据此把空 acd 与真零区分开
+            (
+                "n_cpd_detectors",
+                self.cpd_file.as_ref().map_or(0, CpdFile::detector_count) as f64,
+            ),
             ("n_events", self.evt_file.len() as f64),
             ("n_posatt_samples", self.posatt_file.len() as f64),
             ("time_reversals", reversals.count as f64),
@@ -86,6 +98,7 @@ impl<S: Satellite> blink_core::traits::Chunk for Chunk<S> {
             ("without_attitude", &self.without_attitude),
             ("dropped_single_detector", &self.dropped_single_detector),
             ("events_outside_gti", &self.events_outside_gti),
+            ("merged_gain_duplicates", &self.merged_gain_duplicates),
         ] {
             let value = counter.load(Ordering::Relaxed);
             if value > 0 {
