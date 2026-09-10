@@ -5,6 +5,10 @@
 各路探测器在同一个时间戳上各留一个计数，八个"独立"计数其实是一次事件。这里量
 的就是这件事，量完再决定要不要立判据。
 
+事例口径必须与搜索一致：先准入、后合并双增益重复（见 `read_events`）。任何
+"回到事例流重算候选窗内的量"的脚本，第一件事都是把重算的计数与搜索报的
+`count` 逐条对账，不到 100% 就先修口径，别信重算出来的任何数。
+
 CPD 用多个窗宽量，是因为候选窗常常只有十几微秒：GECAM-C 两路 CPD 合计约 300 c/s，
 10 µs 里期望 0.003 个，看见 0 个什么也说明不了。窗要宽到期望计数有意义为止。
 
@@ -60,7 +64,19 @@ def hour_file(satellite, iso, kind):
 
 
 def read_events(path, want_pi):
-    """把一个小时里各路事例合成按时间排好的 (时刻, 能道, 探头号)。"""
+    """把一个小时里各路事例合成按时间排好的 (时刻, 能道, 探头号)。
+
+    **顺序是先准入、后合并双增益，不能反过来。** 同一个物理光子会被 ADC 的
+    两个增益支路各写一行（见 crate 的 OPEN-QUESTIONS 第 17 条），搜索侧在
+    准入之后把同探头同时戳的两条并成一条。这里必须照同一个顺序做，否则重算
+    的窗内计数比搜索报的 count 系统性偏多——实测 A 星 2024-01-11 不合并时
+    对账只有 12.83%（差值中位 +2、从不为负），先合并后准入是 99.90%，
+    **先准入后合并才是 100.00%**，8,343 个候选逐条相等。
+
+    一个 EVENTS 表就是一路探头，所以表内的同时戳天然就是同探头同时戳。
+    保留高 `GAIN_TYPE`（低增益）那条，与 Rust 侧 `dedupe_gain_pairs` 同规则：
+    高增益支路会饱和，低增益那条永远是有效测量。
+    """
     times, channels, detectors = [], [], []
     with fits.open(path) as hdus:
         for hdu in hdus:
@@ -71,14 +87,34 @@ def read_events(path, want_pi):
             pi = np.asarray(data["PI"]) if want_pi else None
             if want_pi:
                 keep &= (pi >= MIN_CHANNEL) & (pi < OVERFLOW_CHANNEL)
-            times.append(np.asarray(data["TIME"], float)[keep])
-            channels.append(pi[keep] if want_pi else np.zeros(int(keep.sum()), int))
-            detectors.append(np.full(int(keep.sum()), int(hdu.name[-2:])))
+            time = np.asarray(data["TIME"], float)[keep]
+            channel = pi[keep] if want_pi else np.zeros(int(keep.sum()), int)
+            # CPD 没有 GAIN_TYPE 这一列，也没有双增益支路，不做合并
+            gain = np.asarray(data["GAIN_TYPE"])[keep] if "GAIN_TYPE" in data.names else None
+            if gain is not None and time.size:
+                # 先按时戳排、同时戳内按增益档从高到低排，每个时戳留第一条
+                order = np.lexsort((-gain.astype(np.int16), time))
+                time, channel = time[order], channel[order]
+                duplicate = np.zeros(time.size, bool)
+                duplicate[1:] = time[1:] == time[:-1]
+                time, channel = time[~duplicate], channel[~duplicate]
+            times.append(time)
+            channels.append(channel)
+            detectors.append(np.full(time.size, int(hdu.name[-2:])))
     if not times:
         return None
     time = np.concatenate(times)
     order = np.argsort(time)
     return time[order], np.concatenate(channels)[order], np.concatenate(detectors)[order]
+
+
+def span(time, low, high):
+    """已排序时刻里落在 [low, high] 的下标区间。
+
+    候选一多，布尔掩模就不像话了：A 星一天十万个候选 × 一小时四千万个事例
+    是 1e13 次元素操作，B 星单小时 6.6 亿事例更甚。二分是一样的语义。
+    """
+    return int(np.searchsorted(time, low, "left")), int(np.searchsorted(time, high, "right"))
 
 
 def main():
@@ -88,6 +124,8 @@ def main():
     signals = []
     for path in sorted(glob.glob(signals_glob)):
         signals.extend(json.load(open(path)))
+    # 按时刻排一下，一小时的候选才会连着走，事例缓存只需留当前小时
+    signals.sort(key=lambda signal: signal["start"])
     print(f"候选 {len(signals)} 个")
 
     writer = csv.writer(open(out_path, "w", newline=""))
@@ -116,15 +154,21 @@ def main():
             continue
         time, channel, detector = grd
 
-        core = (time >= t0) & (time <= t1)
-        n_core = int(core.sum())
+        first, last = span(time, t0, t1)
+        n_core = last - first
         if n_core == 0:
             continue
+        core = slice(first, last)
         # 同戳簇。天格只有 4 路，一个粒子把 4 路全点亮，"最长一串"就够用；GECAM
         # 有 12 路，一个候选窗里往往有好几个各自独立的小簇（实测某候选在
         # 58.71 µs 上两个、58.81 µs 上两个），最长串只有 2，除以 8 就成了 0.25，
         # 看着像"不同戳"。所以要看的是**参与任何同戳簇的事例占多少**，
         # 而不是最长的那一串。
+        #
+        # `read_events` 已经把同探头的双增益重复并掉了，所以这里剩下的同戳
+        # **只有跨探头的**——那才是"一个粒子穿过整台仪器"该留下的签名。合并
+        # 之前算出来的 `multiplet_frac` 把双增益重复也算了进去，系统性偏高，
+        # 两个口径的数不能混用。
         _, multiplicity = np.unique(time[core], return_counts=True)
         max_mult = int(multiplicity.max())
         n_multiplets = int((multiplicity >= 2).sum())
@@ -134,18 +178,22 @@ def main():
         positive = gaps[gaps > 0]
         min_dt_us = positive.min() * 1e6 if positive.size else 0.0
 
-        near = ((time >= t0 - 1.0) & (time <= t1 + 1.0)) & ~((time >= t0 - 0.01) & (time <= t1 + 0.01))
-        pi_bkg = float(np.median(channel[near])) if near.any() else np.nan
+        far_first, far_last = span(time, t0 - 1.0, t1 + 1.0)
+        hole_first, hole_last = span(time, t0 - 0.01, t1 + 0.01)
+        near = np.concatenate(
+            (channel[far_first:hole_first], channel[hole_last:far_last])
+        )
+        pi_bkg = float(np.median(near)) if near.size else np.nan
         pi_core = float(np.median(channel[core]))
-        window = (time >= t0 - 0.5) & (time <= t1 + 0.5)
+        window_first, window_last = span(time, t0 - 0.5, t1 + 0.5)
 
         cpd_counts = []
         for half in CPD_HALF_WIDTHS:
             if cpd is None:
                 cpd_counts.append("")
                 continue
-            cpd_time = cpd[0]
-            cpd_counts.append(int(((cpd_time >= t0 - half) & (cpd_time <= t1 + half)).sum()))
+            lower, upper = span(cpd[0], t0 - half, t1 + half)
+            cpd_counts.append(upper - lower)
 
         writer.writerow(
             [iso[:23], f"{signal['false_positive_per_year']:.3e}", signal["count"],
@@ -156,15 +204,16 @@ def main():
              f"{min_dt_us:.3f}", f"{pi_core:.0f}",
              f"{pi_bkg:.0f}" if np.isfinite(pi_bkg) else "",
              f"{pi_core / pi_bkg:.3f}" if np.isfinite(pi_bkg) and pi_bkg > 0 else "",
-             f"{window.sum() / (1.0 + signal['bin_size_best']):.0f}"]
+             f"{(window_last - window_first) / (1.0 + signal['bin_size_best']):.0f}"]
             + cpd_counts
         )
         written += 1
         # 一小时的事例几千万，缓存只留当前小时
         if len(grd_cache) > 1:
-            for stale in [k for k in grd_cache if k != key]:
-                grd_cache.pop(stale)
-                cpd_cache.pop(stale, None)
+            grd, cpd = grd_cache[key], cpd_cache.get(key)
+            grd_cache.clear()
+            cpd_cache.clear()
+            grd_cache[key], cpd_cache[key] = grd, cpd
 
     print("写出", written)
 
