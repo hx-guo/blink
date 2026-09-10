@@ -2,9 +2,12 @@
 //!
 //! 输入任意带 `start`/`stop` 列（UTC ISO 或 MET 数字）的 CSV——
 //! `sig_all_v5.csv` 原样可用；输出保留全部输入列，追加
-//! `n,n_acd,n_acd_multi,n_bg,n_acd_bg` 五列原始计数，以及 `det_share_max`——
+//! `n,n_acd,n_acd_multi,n_bg,n_acd_bg` 五列原始计数，`det_share_max`——
 //! 窗内贡献最多的那个探头占窗内事例数的比例（单路毛刺判据的审计量，
-//! 这里按候选的 start/stop 整窗算，搜索里按最显著一格算）。
+//! 这里按候选的 start/stop 整窗算，搜索里按最显著一格算），以及
+//! `det_window`/`det_baseline`——18 路探头在候选窗与基线窗内的计数，
+//! `|` 分隔、下标即 Det_ID（0..17）。逐路向量原本只在搜索现场取得到；
+//! 这两列让冻结的目录不重跑搜索也能补上，两列之和分别恒等于 `n` 与 `n_bg`。
 //! 事例选择与窗口定义复用搜索侧同一实现（`blink_hxmt_he::algorithms::acd`），
 //! 两边数字可直接互校。需在能访问 1K 档案的机器上运行。
 
@@ -12,6 +15,7 @@ use blink_algorithms::detector_share::max_detector_fraction;
 use blink_core::traits::Event as _;
 use blink_core::types::MissionElapsedTime;
 use blink_hxmt_he::algorithms::acd::acd_counts;
+use blink_hxmt_he::algorithms::detectors::detector_counts;
 use blink_hxmt_he::io::level_1k::EventFile;
 use blink_hxmt_he::types::{Event, HxmtHe};
 use chrono::prelude::*;
@@ -29,6 +33,18 @@ fn parse_time(s: &str) -> Option<f64> {
         .or_else(|_| format!("{s}Z").parse::<DateTime<Utc>>())
         .ok()?;
     Some(MissionElapsedTime::<HxmtHe>::from(utc).met())
+}
+
+/// 逐路计数写成一格：18 个数用 `|` 连起来，不占 18 列也不破坏原有列序。
+fn join_counts(counts: Option<&[u32]>) -> String {
+    match counts {
+        Some(values) => values
+            .iter()
+            .map(u32::to_string)
+            .collect::<Vec<_>>()
+            .join("|"),
+        None => String::new(),
+    }
 }
 
 fn epoch_hour(met: f64) -> DateTime<Utc> {
@@ -65,6 +81,7 @@ pub fn cmd_acd_audit(list: &Path, out: &Path, scint: &str) {
         window: Option<(f64, f64)>,
         counts: Option<blink_core::types::AcdCounts>,
         det_share_max: Option<f64>,
+        detectors: Option<blink_core::types::DetectorCounts>,
     }
     let mut rows: Vec<Row> = lines
         .filter(|line| !line.trim().is_empty())
@@ -79,6 +96,7 @@ pub fn cmd_acd_audit(list: &Path, out: &Path, scint: &str) {
                 window,
                 counts: None,
                 det_share_max: None,
+                detectors: None,
             }
         })
         .collect();
@@ -112,6 +130,7 @@ pub fn cmd_acd_audit(list: &Path, out: &Path, scint: &str) {
         for index in indices {
             let (start, stop) = rows[index].window.expect("grouped rows have windows");
             rows[index].counts = Some(acd_counts(&events, start, stop));
+            rows[index].detectors = Some(detector_counts(&events, start, stop));
             rows[index].det_share_max = Some(max_detector_fraction(
                 &events,
                 MissionElapsedTime::new(start),
@@ -126,23 +145,25 @@ pub fn cmd_acd_audit(list: &Path, out: &Path, scint: &str) {
 
     let mut output = String::with_capacity(content.len() * 2);
     output.push_str(header);
-    output.push_str(",n,n_acd,n_acd_multi,n_bg,n_acd_bg,det_share_max\n");
+    output.push_str(",n,n_acd,n_acd_multi,n_bg,n_acd_bg,det_share_max,det_window,det_baseline\n");
     let mut n_unresolved = 0usize;
     for row in &rows {
         output.push_str(row.line);
         match &row.counts {
             Some(c) => output.push_str(&format!(
-                ",{},{},{},{},{},{:.3}\n",
+                ",{},{},{},{},{},{:.3},{},{}\n",
                 c.n,
                 c.n_acd,
                 c.n_acd_multi,
                 c.n_bg,
                 c.n_acd_bg,
-                row.det_share_max.unwrap_or(f64::NAN)
+                row.det_share_max.unwrap_or(f64::NAN),
+                join_counts(row.detectors.as_ref().map(|d| d.window.as_slice())),
+                join_counts(row.detectors.as_ref().map(|d| d.baseline.as_slice())),
             )),
             None => {
                 n_unresolved += 1;
-                output.push_str(",,,,,,\n");
+                output.push_str(",,,,,,,,\n");
             }
         }
     }
