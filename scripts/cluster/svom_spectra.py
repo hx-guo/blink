@@ -1,14 +1,21 @@
 """SVOM/GRM 能阈核对：证实 TGF、未证实显著候选、本底的 PI 谱，以及能阈扫描（不同能阈下证实样本的信噪）。
 输入: svom_top795.csv（显著候选 start,stop,...）、assoc_svom_v5.csv（associated,in_coverage）
-输出: spectra.csv（逐道计数）、thr_scan.csv（逐候选逐能阈的 S、B）、burst.csv（低道事例的成簇性）、ebounds.csv"""
+输出: spectra.csv（逐道计数）、thr_scan.csv（逐候选逐能阈的 S、B）、burst.csv（低道事例的成簇性）、ebounds.csv
+用法: python3 svom_spectra.py [输入目录] [输出目录]（都不给则读写 svomrun5）"""
 from astropy.io import fits
 import numpy as np, glob, csv, sys, os
 from datetime import datetime, timezone
 from scipy.stats import poisson
 D = "/gecamfs/SVOM/Archived-DATA/GRM-DATA/L1B/daily"; REF = datetime(2017, 1, 1, tzinfo=timezone.utc)
-R = "/scratchfs2/gecam/guohx/svomrun5"
+R = sys.argv[1] if len(sys.argv) > 1 else "/scratchfs2/gecam/guohx/svomrun5"
+OUT = sys.argv[2] if len(sys.argv) > 2 else R
 def met(iso):
-    b = iso.rstrip("Z"); h, _, f = b.partition("."); return (datetime.strptime(h + "." + (f + "000000")[:6], "%Y-%m-%dT%H:%M:%S.%f").replace(tzinfo=timezone.utc) - REF).total_seconds()
+    """ISO → MET。小数秒不能截：候选的 start/stop 就是窗内首末两个事例的时刻，
+    截到微秒会把窗口左移最多 1 µs、末端点落到最后一个事例之前——实测 901 个显著
+    候选里 49.9% 因此少算一个事例。整秒走 strptime，小数秒单独加。"""
+    b = iso.rstrip("Z"); h, _, f = b.partition(".")
+    stamp = datetime.strptime(h, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+    return (stamp - REF).total_seconds() + (float("0." + f) if f else 0.0)
 cands = list(csv.DictReader(open(f"{R}/svom_top795.csv")))
 assoc = {r["start"][:26]: (r["associated"] == "1", r["in_coverage"] == "1") for r in csv.DictReader(open(f"{R}/assoc_svom_v5.csv"))}
 by_hour = {}
@@ -17,15 +24,15 @@ for c in cands:
     by_hour.setdefault((utc.strftime("%Y/%m/%d"), utc.strftime("%H")), []).append((c, m0, m1))
 THR = [10, 12, 15, 18, 20, 25, 30, 40, 50]
 spec = {"assoc": np.zeros(260), "nonassoc": np.zeros(260), "bkg": np.zeros(260), "bkg_seconds": 0.0, "hour_all": np.zeros(260), "hour_seconds": 0.0}
-scan = open(f"{R}/thr_scan.csv", "w"); scan.write("start,fa,assoc,cov,dur_s," + ",".join(f"S{t}" for t in THR) + "," + ",".join(f"B{t}" for t in THR) + "\n")
-burst = open(f"{R}/burst.csv", "w"); burst.write("hour,band,n_events,ms_bins_ge5,frac_events_in_bursty_bins\n")
+scan = open(f"{OUT}/thr_scan.csv", "w"); scan.write("start,fa,assoc,cov,dur_s," + ",".join(f"S{t}" for t in THR) + "," + ",".join(f"B{t}" for t in THR) + "\n")
+burst = open(f"{OUT}/burst.csv", "w"); burst.write("hour,band,n_events,ms_bins_ge5,frac_events_in_bursty_bins\n")
 done_hours = 0
 for (day, hh), items in sorted(by_hour.items()):
     g = sorted(glob.glob(f"{D}/{day}/grm_evt/svom_grm_evt_{datetime.strptime(day, '%Y/%m/%d').strftime('%y%m%d')}_{hh}_v*.fits"))
     if not g: continue
     with fits.open(g[-1]) as h:
         if done_hours == 0:
-            with open(f"{R}/ebounds.csv", "w") as f:
+            with open(f"{OUT}/ebounds.csv", "w") as f:
                 f.write("channel,e_min,e_max\n")
                 for r in h["EBOUNDS"].data: f.write(f"{int(r[0])},{float(r[1]):.4f},{float(r[2]):.4f}\n")
         T = []; P = []
@@ -57,7 +64,7 @@ for (day, hh), items in sorted(by_hour.items()):
         scan.write(f"{c['start'][:26]},{c['false_positive_per_year']},{int(a_)},{int(cov)},{dur:.6f}," + ",".join(map(str, S)) + "," + ",".join(f"{b:.4f}" for b in B) + "\n")
     done_hours += 1
     if done_hours % 50 == 0: print(done_hours, "hours", flush=True)
-with open(f"{R}/spectra.csv", "w") as f:
+with open(f"{OUT}/spectra.csv", "w") as f:
     f.write("channel,assoc_core,nonassoc_core,bkg,hour_all\n")
     for ch in range(260): f.write(f"{ch},{int(spec['assoc'][ch])},{int(spec['nonassoc'][ch])},{int(spec['bkg'][ch])},{int(spec['hour_all'][ch])}\n")
     f.write(f"# bkg_seconds={spec['bkg_seconds']:.1f} hour_seconds={spec['hour_seconds']:.1f}\n")

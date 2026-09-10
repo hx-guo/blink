@@ -20,8 +20,13 @@ BIN = 100e-6
 
 
 def met(iso):
+    """ISO → MET。小数秒不能截：serde 写的是纳秒精度，而候选的 start/stop 恰好
+    就是窗内首末两个事例的时刻。截到微秒会把窗口左端点往前挪最多 1 µs，末端点
+    随之挪到最后一个事例之前——实测 901 个显著候选里 49.9% 因此少算一个事例。
+    整秒走 strptime，小数秒单独加。"""
     b = iso.rstrip("Z"); h, _, f = b.partition(".")
-    return (datetime.strptime(h + "." + (f + "000000")[:6], "%Y-%m-%dT%H:%M:%S.%f").replace(tzinfo=timezone.utc) - REF).total_seconds()
+    stamp = datetime.strptime(h, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+    return (stamp - REF).total_seconds() + (float("0." + f) if f else 0.0)
 
 
 def load_hour(m0):
