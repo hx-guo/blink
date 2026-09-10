@@ -10,8 +10,33 @@ use uom::si::f64::*;
 use crate::types::instrument::{Gecam, Satellite};
 use crate::types::{Chunk, Event};
 
-/// CPD 统计用的基线窗半宽（秒）。候选窗两侧各取这么长作本底，与搜索的
-/// `neighbor` 同一量级，好让 `n_acd / n_acd_bg` 有可比的分母。
+/// 搜索本底窗的**全宽**（秒）：`search_new` 实际取候选两侧各 `neighbor / 2`。
+const SEARCH_NEIGHBOR_SECONDS: f64 = 1.0;
+/// 搜索空窗的**全宽**（秒）：候选两侧各 `hollow / 2` 从本底里挖掉。
+const SEARCH_HOLLOW_MILLISECONDS: f64 = 10.0;
+
+/// 审计统计（`cpd_counts`、`detector_counts`）用的基线窗**半宽**（秒）。
+///
+/// **它不等于搜索的本底窗，正好是搜索的两倍宽**，而且还差两件事。数值上
+/// `CPD_BASELINE_SECONDS == SEARCH_NEIGHBOR_SECONDS`，但前者是半宽、后者是
+/// 全宽，所以审计取的是候选两侧各 1 s、搜索取的是各 0.5 s。除此之外：
+///
+/// * **审计不挖空窗。** 搜索从本底里挖掉候选两侧各 `hollow / 2` = 5 ms，
+///   审计只挖掉候选窗本身。
+/// * **审计不夹 GTI。** 搜索把本底窗夹到候选所在的那一段活时间里再算时长，
+///   审计的 `baseline_seconds` 是**标称的 2 s，不是活时间**。
+///
+/// **后果，用这些数之前必须清楚：**
+///
+/// * `n_acd_bg / baseline_seconds` 只有在本底率**平稳且窗内没有 GTI 缺口**时
+///   才是"该候选处的 CPD 率"。GECAM 的候选恰恰常落在率剧变的地方（GTI 边界、
+///   高磁纬进出、粒子增强期），而 GECAM 的 GTI 一小时常被切成一到四段。
+///   **窗跨了缺口就会低估率**，跟着高估任何"观测/期望"的超出。要准就回
+///   CPD 事例流按活时间自己数，别用这里的标称分母。
+/// * **不能拿这些计数去反推搜索的 `mean`**，会差两倍。
+///
+/// **不改窗、只把话说清楚**：两倍窗给的统计量更多、更稳，而改窗会让已经落盘
+/// 的候选表前后不可比。
 const CPD_BASELINE_SECONDS: f64 = 1.0;
 
 pub(super) fn search<S: Satellite>(chunk: &Chunk<S>) -> Vec<Signal<Event<S>>> {
@@ -64,8 +89,8 @@ pub(super) fn search<S: Satellite>(chunk: &Chunk<S>) -> Vec<Signal<Event<S>>> {
             // 窗长上限沿用 SVOM/GRM 的 1 ms。GECAM 自己的 TGF 样本还没攒出来，
             // 攒出来之后要按同样的办法复核：拿证实样本量 T90，看 1 ms 够不够。
             max_duration: Time::new::<uom::si::time::millisecond>(1.0),
-            neighbor: Time::new::<uom::si::time::second>(1.0),
-            hollow: Time::new::<uom::si::time::millisecond>(10.0),
+            neighbor: Time::new::<uom::si::time::second>(SEARCH_NEIGHBOR_SECONDS),
+            hollow: Time::new::<uom::si::time::millisecond>(SEARCH_HOLLOW_MILLISECONDS),
             false_positive_per_year: 20.0,
             min_number: 8,
             // 单组：各路 GRD 朝向不同，合成一路，符合判据退化
@@ -150,8 +175,10 @@ pub(super) fn search<S: Satellite>(chunk: &Chunk<S>) -> Vec<Signal<Event<S>>> {
 /// **同一个物理光子会被 ADC 的两个增益支路各写一行。** 实测 GECAM-C
 /// 2023-06-15 12h 全 12 路：同探头同时戳的事例对占原始事例 6.635%，这些对
 /// **100%** 是 `GAIN_TYPE` 一高一低、`FLAG` 一个 0 一个 10、`EVT_PAIR`
-/// 两端都为真，而 PI 相同的占 0%（高增益那条中位 448 已进溢出道，低增益
-/// 那条中位 377）。所以它们不是两个光子，是一个光子的两条记录。
+/// 两端都为真，而 PI 相同的占 0%。所以它们不是两个光子，是一个光子的两条
+/// 记录。GECAM-A 2024-01-11 独立复现（123 万对），并排除了「其实是同探头
+/// 29.8 ns 内的两个独立事例」：按单路 748 c/s 算偶然同戳对的期望是 11 对／
+/// 路／过境，实测 49,214 对／路，**99.98% 是真双增益读出**。
 ///
 /// 多数时候高增益那条已经饱和进溢出道、被 `Event::keep` 的 `PI < 448` 挡掉，
 /// 一个物理事例只剩一条（占 98.8%）。但剩下的 1.2% 两条都过了准入，于是
@@ -160,9 +187,17 @@ pub(super) fn search<S: Satellite>(chunk: &Chunk<S>) -> Vec<Signal<Event<S>>> {
 /// 泊松独立性直接破掉，跟带电粒子跨探头同时点亮是同一类机制，只是发生在
 /// 一路探头内部。粗估反标定表明约 28% 的候选是这么造出来的。
 ///
-/// **保留低增益那条。** 高增益支路会饱和，低增益那条永远是有效测量；两条都
-/// 没饱和时留哪条对搜索的计数没有影响，但对能量有——两档的 PI 是不是同一把
-/// 尺子还没核实，见 OPEN-QUESTIONS。
+/// **保留低增益那条，理由是量程不是饱和。** 「高增益支路会饱和」这个先前的
+/// 说法**实测不成立**：GECAM-A 2024-01-11 的 123 万对里，高增益条
+/// `PI >= 448` 的占 **0.00%**。真正的理由是两档的量程差一个数量级——低增益
+/// 支路的高能端撑到 **ch≈379（约 4.0 MeV）**，高增益支路在 **ch≈157
+/// （约 215 keV）** 就到顶了，**留高增益条会把 215 keV 以上的信息整段丢掉**。
+///
+/// **两档不是同一把尺子，而且偏差随能量发散。** 同一对里 PI 完全相同的只有
+/// 3.06%，高−低的差中位 −8 道、5–95% 为 −46..+9；按低增益道号分段，
+/// ch54–100 段差中位 +2、ch100–200 段 −13、ch200–300 段 −64。所以留哪条
+/// **对计数可忽略、对能量不可忽略**：会因为留哪条而跨过 `MIN_CHANNEL` 的对
+/// 占 0.18%（折到全部事例约 0.02%），但道号差中位 −8 道 ≈ 11% 能量。
 ///
 /// 判据用「同探头同时戳」这个实测事实，不用 `EVT_PAIR` 那一列：实测
 /// `EVT_PAIR` 为真的事例占 19.9%，而同戳对只占 7.9%，两者对不上（伴侣可能
@@ -220,6 +255,9 @@ fn dedupe_gain_pairs<S: Satellite>(events: &mut Vec<Event<S>>) -> usize {
 ///
 /// * `n` / `n_bg`：候选窗、基线窗内通过准入的 GRD 事例数
 /// * `n_acd` / `n_acd_bg`：同两个窗内的 CPD 事例数
+///
+/// **基线窗是候选两侧各 `CPD_BASELINE_SECONDS`，正好是搜索本底窗的两倍宽，
+/// 而且不挖空窗、不夹 GTI**——口径与后果见 `CPD_BASELINE_SECONDS` 的注释。
 /// * `n_acd_multi`：候选窗内、10 µs 内有另一路 CPD 一起响的事例数。一路响
 ///   可能是本底，多路同时响基本只能是穿过整台仪器的带电粒子。
 ///
@@ -271,7 +309,12 @@ fn cpd_counts<S: Satellite>(
 /// GRB、TGF 与 TEB，而这正是天格上卡住的那个问题。
 ///
 /// 基线窗一并存，否则分不清"这一路亮"和"这一路本来就快"（各路本底率实测能
-/// 差一倍以上）。
+/// 差一倍以上）。**`baseline_seconds` 是标称的 2 s，不是活时间**，与搜索的
+/// 本底窗也不是同一个窗——见 `CPD_BASELINE_SECONDS`。
+///
+/// 逐路基线还能看见一件 GTI 根本不表达的事：**探头级的部分停机**。GTI 是全
+/// 仪器概念，25 路里掉一路、仪器照样"活着"，只是有效面积在变，而 `mean` 的
+/// 分母不会跟着改、`fa` 就偏低。基线向量里的零格是唯一看得见它的地方。
 fn detector_counts<S: Satellite>(
     detector_count: usize,
     events: &[Event<S>],
@@ -323,6 +366,23 @@ mod tests {
             evt_type: 1,
             flag: 0,
         }
+    }
+
+    /// 审计窗与搜索窗的关系是个容易写错的地方（原注释就写成了"与搜索一致"，
+    /// 实际是两倍），钉在这里，日后谁改了 `neighbor` 就会看见这条。
+    #[test]
+    fn the_audit_baseline_window_is_twice_the_search_one() {
+        // 搜索取候选两侧各 `neighbor / 2`，审计取两侧各 `CPD_BASELINE_SECONDS`
+        let search_half_width = SEARCH_NEIGHBOR_SECONDS / 2.0;
+        assert_eq!(CPD_BASELINE_SECONDS, 2.0 * search_half_width);
+        // `DetectorCounts::baseline_seconds` 存的是两侧合计的标称时长，不是活时间
+        let counts = detector_counts(
+            1,
+            &[event(10.0, 1)],
+            MissionElapsedTime::new(9.9),
+            MissionElapsedTime::new(10.1),
+        );
+        assert_eq!(counts.baseline_seconds, 4.0 * search_half_width);
     }
 
     fn gain_event(time: f64, detector_id: u8, gain_type: u8, channel: i16) -> Event<SatC> {
