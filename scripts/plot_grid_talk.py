@@ -288,7 +288,7 @@ def fig_map(d, out):
 
     ax.set_title("天格候选的地理分布：A 角在低纬雷暴区、B 角在高磁纬海域\n"
                  "A 角 %d 个与 %d 个闪电证实的 TGF 全部来自 GRID-03B；"
-                 "B 角经 GECAM 的带电粒子探测器判为磁层沉降电子"
+                 "B 角的同型事件在 GECAM 上出现于带电粒子沉降环境"
                  % (int(a.sum()), int(asc.sum())),
                  fontsize=15.5, pad=12, linespacing=1.5)
     fig.savefig(out, dpi=160, bbox_inches="tight"); print("wrote", out)
@@ -303,7 +303,7 @@ EXAMPLES = [
          note="152.9°E 11.96°S｜偶极磁纬 −18°｜同时刻有闪电，巧合概率 3×10⁻⁴"),
     dict(tag="GRID-02_20210124T195431291", sat="GRID-02", color=BLUE,
          title="B 角：GRID-02 2021-01-24 19:54:31.3 UTC",
-         note="149.3°W 47.2°S｜偶极磁纬 −45°｜WWLLN 有覆盖但无闪电｜同型事件经 GECAM 的带电粒子探测器判为粒子沉降"),
+         note="149.3°W 47.2°S｜偶极磁纬 −45°｜WWLLN 有覆盖但无闪电"),
 ]
 
 
