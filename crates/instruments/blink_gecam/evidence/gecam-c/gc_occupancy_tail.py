@@ -116,20 +116,42 @@ def load_hour(path):
 
 
 def occupancy(time, gti_a, gti_b, width):
-    """在 GTI 段内切等宽格，返回每格的计数（段尾不足一格的丢掉）。"""
-    counts = []
+    """在 GTI 段内切等宽格，返回**占据数直方**（下标 = 每格的计数）与总格数。
+
+    **不能把每格的计数实体化**：`W = 0.1 µs` 时 2,707 s 活时间就是 2.7e10 格，
+    一个 int64 数组要 61 GB。而尾概率只需要两样东西——**非空格的占据数分布**
+    （长度 = 事例数量级）与**总格数**（一个标量），空格子只进 `hist[0]`。
+
+    段尾不足一格的那一截丢掉：否则末格计数偏低，会把尾压平。
+    """
+    hist = np.zeros(1, np.int64)
+    total_bins = 0
     for a, b in zip(gti_a, gti_b):
         n_bins = int((b - a) // width)
         if n_bins < 1:
             continue
+        total_bins += n_bins
         lo = np.searchsorted(time, a, "left")
         hi = np.searchsorted(time, a + n_bins * width, "left")
-        if hi > lo:
-            idx = ((time[lo:hi] - a) / width).astype(np.int64)
-            counts.append(np.bincount(idx, minlength=n_bins))
-        else:
-            counts.append(np.zeros(n_bins, np.int64))
-    return np.concatenate(counts) if counts else np.empty(0, np.int64)
+        if hi <= lo:
+            continue
+        idx = ((time[lo:hi] - a) / width).astype(np.int64)
+        # idx 已按时间有序，相邻相等即同格 —— 直接数每段连续相等的长度
+        _, per_bin = np.unique(idx, return_counts=True)
+        segment = np.bincount(per_bin)
+        if segment.size > hist.size:
+            grown = np.zeros(segment.size, np.int64)
+            grown[: hist.size] = hist
+            hist = grown
+        hist[: segment.size] += segment
+        # 这一段里空着的格
+        hist[0] += n_bins - per_bin.size
+    return hist, total_bins
+
+
+def tail_from_hist(hist, k):
+    """直方给出的 `P(X >= k)` 的分子（格数）。"""
+    return int(hist[k:].sum()) if k < hist.size else 0
 
 
 def main():
@@ -148,20 +170,22 @@ def main():
         print(f"\n===== {os.path.basename(path)}  去重后事例 {time.size:,}  "
               f"GTI {live:.0f} s  全局率 {time.size / live:.0f} c/s =====")
         for width in WIDTHS:
-            counts = occupancy(time, gti_a, gti_b, width)
-            if counts.size == 0:
+            hist, total_bins = occupancy(time, gti_a, gti_b, width)
+            if total_bins == 0:
                 continue
-            lam = counts.mean()
-            print(f"\n  窗宽 W = {width * 1e6:g} µs   格数 {counts.size:,}   "
-                  f"λ = {lam:.4g}   实测方差/均值 = {counts.var() / max(lam, 1e-12):.3f}"
+            k_values = np.arange(hist.size)
+            lam = float((hist * k_values).sum()) / total_bins
+            variance = float((hist * (k_values - lam) ** 2).sum()) / total_bins
+            print(f"\n  窗宽 W = {width * 1e6:g} µs   格数 {total_bins:,}   "
+                  f"λ = {lam:.4g}   实测方差/均值 = {variance / max(lam, 1e-12):.3f}"
                   f"（泊松应为 1）")
             print("    k    实测 ≥k 的格数   实测尾概率    泊松尾概率     **比值**")
             shown = 0
             for k in range(2, 41):
-                n_ge = int((counts >= k).sum())
+                n_ge = tail_from_hist(hist, k)
                 if n_ge == 0:
                     break
-                empirical = n_ge / counts.size
+                empirical = n_ge / total_bins
                 poisson = float(stats.poisson.sf(k - 1, lam))
                 ratio = empirical / poisson if poisson > 0 else float("inf")
                 mark = "  ← 候选 k 中位" if k == MEDIAN_K else ""
