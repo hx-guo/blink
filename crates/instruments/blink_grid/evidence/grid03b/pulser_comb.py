@@ -123,8 +123,12 @@ def main():
         bkg = (int(w.sum()) - obs) / max(nb, 1)
         exp = bkg * (hi - lo + 1)
         print("   基频齿实测 %d 对；局部本底 %.2f 对/tick ⇒ 期望 %.1f" % (obs, bkg, exp))
-        print("   **实测 / 期望 = %.0f 倍**" % (obs / exp if exp > 0 else float("inf")))
-        print("   （均匀假设会给 %.1f，两者可差几倍——本底必须用实测分布）"
+        if exp < 1.0:
+            print("   **局部本底实测为零**（期望 < 1 对）。此时「实测/期望」是个退化的比值，")
+            print("   只说明「齿以外是空的」，**不要引用那个倍数**——它由本底的零值主导。")
+        else:
+            print("   **实测 / 期望 = %.0f 倍**" % (obs / exp))
+        print("   （均匀间隔假设会给期望 %.1f；本底必须用实测的局部分布，两者可差几倍）"
               % ((hi - lo + 1) / d4.mean() * d4.size))
 
     print()
