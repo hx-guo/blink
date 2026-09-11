@@ -164,8 +164,35 @@ def main():
           % (a[msk2, 7].min(), a[msk2, 7].max(), np.median(a[msk2, 7]),
              a[msk2, 8].min(), a[msk2, 8].max(), np.median(a[msk2, 8])))
     print()
-    print("读法：v12 的 λ₃ 用窗内实测计数，暴越亮 λ₃ 越大，所以亮端不必然挂；")
-    print("      `f₃ > 0.5` 的阈值与亮度无关，亮端必挂。两条的走向要并排看。")
+    print("=== 正对照回收率 = 1 − 误杀率（喂进去的都是真暴，理想值 1.0）===")
+    print("参照不是 1.0：`f₃ > 0.5` 在 03B 对照臂上本来就有约 10% 的基础误杀，")
+    print("所以 v12 要跟 **0.90** 比，不是跟 1.00 比。")
+    print()
+    print("逐窗长档（A 角真暴的实测窗长是 41–173 µs，看 30–300 µs 这几行）：")
+    print("%10s %14s %14s %10s" % ("W µs", "v12 回收率", "f₃>0.5 回收率", "v12 − f₃"))
+    for w in sorted(set(a[:, 1])):
+        msk = a[:, 1] == w
+        v = 1.0 - np.median(a[msk, 7])
+        f = 1.0 - np.median(a[msk, 8])
+        print("%10.0f %14.3f %14.3f %10.3f" % (w, v, f, v - f))
+    print()
+    print("逐亮度档（A 角候选的实测计数是 8–21，个位到二十几）：")
+    print("%10s %14s %14s %10s" % ("n", "v12 回收率", "f₃>0.5 回收率", "v12 − f₃"))
+    for n in sorted(set(a[:, 0])):
+        msk = a[:, 0] == n
+        v = 1.0 - np.median(a[msk, 7])
+        f = 1.0 - np.median(a[msk, 8])
+        print("%10.0f %14.3f %14.3f %10.3f" % (n, v, f, v - f))
+    print()
+    band = (a[:, 1] >= 30.0) & (a[:, 1] <= 300.0) & (a[:, 0] >= 8) & (a[:, 0] <= 20)
+    print("**目标人群的工作档（n = 8–20 且 W = 30–300 µs，A 角真暴就在这里）**：")
+    print("   v12 回收率 %.3f–%.3f（中位 %.3f）；f₃ > 0.5 回收率 %.3f–%.3f（中位 %.3f）"
+          % (1 - a[band, 7].max(), 1 - a[band, 7].min(), 1 - np.median(a[band, 7]),
+             1 - a[band, 8].max(), 1 - a[band, 8].min(), 1 - np.median(a[band, 8])))
+    print()
+    print("读法：v12 的 λ₃ 用窗内实测计数，暴越亮 λ₃ 越大，所以**亮端不是它的死穴**；")
+    print("      它的死穴在**长窗**——λ₃ 由本底项 r₃·W 主导，窗越长 λ₃ 越小于阈值，")
+    print("      于是一个三重簇就够否决。`f₃ > 0.5` 恰好相反，亮端必挂、长窗反而安全。")
 
     if args.truth:
         truth_power(args.truth, a, args.trials)
