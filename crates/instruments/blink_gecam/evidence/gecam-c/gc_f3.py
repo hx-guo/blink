@@ -26,8 +26,27 @@ from astropy.io import fits
 
 ROOT = "/gecamfs/hebs/Archived-DATA/GSDC/LEVEL1/daily"
 EPOCH = (2021, 1, 1)
-MIN_CHANNEL, OVERFLOW_CHANNEL, NORMAL_EVT_TYPE = 54, 448, 1
+# 能阈存能量、切的时候折成道号，折算逐文件做——见 `ladder()`。写死道号不行：
+# 归档里有两把能量梯，同一个道号在它们上面差一倍能量。
+MIN_ENERGY_KEV, NORMAL_EVT_TYPE = 40.0, 1
 TOLERANCE = 1e-7  # 100 ns，按 GECAM-C 探头间相对定时精度 0.1 µs（arXiv 2308.11362）
+
+def ladder(hdus, min_energy_kev=MIN_ENERGY_KEV):
+    """从这个文件自己的 EBOUNDS 推出 (能阈道, 梯长)，与 Rust 侧同规则。
+
+    **梯长 = 从 ch0 起 `E_MAX[k-1] == E_MIN[k]` 连续到断开为止的长度**（470 行
+    那版在 ch448 断，896 行那版一路到表尾），**能阈道 = 梯上第一个上边界越过
+    `min_energy_kev` 的道**（470 版 ch54、896 版 ch109）。两个都不能写死：
+    GECAM-C 2022-08-03 .. 10-15 那 1,121 小时是细梯，同一个道号差一倍能量。
+    """
+    eb = hdus["EBOUNDS"].data
+    e_min = np.asarray(eb["E_MIN"], float)
+    e_max = np.asarray(eb["E_MAX"], float)
+    broken = np.flatnonzero(np.abs(e_min[1:] - e_max[:-1]) > e_max[:-1] * 1e-4)
+    length = int(broken[0]) + 1 if broken.size else e_min.size
+    above = np.flatnonzero(e_max[:length] > min_energy_kev)
+    return (int(above[0]) if above.size else length), length
+
 
 
 def met(iso):
@@ -47,12 +66,13 @@ def hour_file(iso):
 def read_events(path):
     times, detectors, gains = [], [], []
     with fits.open(path, memmap=True) as hdus:
+        min_channel, ladder_length = ladder(hdus)
         for hdu in hdus:
             if not hdu.name.startswith("EVENTS"):
                 continue
             data = hdu.data
             pi = np.asarray(data["PI"])
-            keep = (np.asarray(data["EVT_TYPE"]) == NORMAL_EVT_TYPE) & (pi >= MIN_CHANNEL) & (pi < OVERFLOW_CHANNEL)
+            keep = (np.asarray(data["EVT_TYPE"]) == NORMAL_EVT_TYPE) & (pi >= min_channel) & (pi < ladder_length)
             times.append(np.asarray(data["TIME"], float)[keep])
             detectors.append(np.full(int(keep.sum()), int(hdu.name[-2:])))
             gains.append(np.asarray(data["GAIN_TYPE"])[keep].astype(int))
