@@ -71,6 +71,32 @@ fn mmap_budget(file_bytes: u64, address_space: Option<u64>) -> i64 {
     i64::try_from(budget).unwrap_or(i64::MAX)
 }
 
+/// 每条 WWLLN 连接实际吃掉的虚拟地址空间。
+///
+/// SQLite 把 `mmap_size` 封在 `SQLITE_MAX_MMAP_SIZE = 0x7FFF0000`，实测每条
+/// 映射恰好 2,097,088 KB，与我们请求多少无关（见 `mmap_budget`）。
+const MMAP_BYTES_PER_CONNECTION: u64 = 0x7FFF_0000;
+
+/// 一个进程能安全并发持有多少条 WWLLN 连接；不设 `RLIMIT_AS` 时返回 `None`。
+///
+/// **虚拟地址空间不共享**：同一个文件映射 N 次就占 N 份（实测同进程连续 mmap
+/// 同一文件 4 次、每次 5 GB，`VmSize` 从 246,756 KB 长到 19,778,020 KB），
+/// 而 `RLIMIT_AS` 数的正是它。所以要放得下 `(n + 1)` 条——`+1` 是主线程为
+/// `coverage()` 开的那条。
+///
+/// 留四分之一余量给堆、线程栈和别的映射。返回值至少是 1：给不出余量也要让
+/// 程序跑起来，由内核去拒绝，而不是在这里算出 0 条来。
+pub fn max_connections() -> Option<usize> {
+    address_space_limit().map(connections_within)
+}
+
+/// `max_connections` 的纯函数部分，好让上面那套算术能被测到。
+fn connections_within(address_space: u64) -> usize {
+    let usable = address_space / 4 * 3;
+    let n = usable / MMAP_BYTES_PER_CONNECTION;
+    n.saturating_sub(1).max(1) as usize
+}
+
 /// 进程的地址空间上限（`RLIMIT_AS`）。取不到或不设限时返回 `None`。
 ///
 /// 走 `/proc/self/limits` 而不是 `getrlimit`，是为了不给这个 crate 引进 `libc`
@@ -196,5 +222,28 @@ mod tests {
     fn an_unlimited_address_space_reads_as_no_limit() {
         let limits = "Max address space         unlimited            unlimited            bytes\n";
         assert_eq!(parse_address_space_limit(limits), None);
+    }
+
+    #[test]
+    fn the_connection_cap_leaves_room_for_the_main_thread() {
+        // 20 GB 地址空间：留四分之一余量后 15 GB = 13.97 GiB，每条连接 2 GiB
+        // ⇒ 6 条，减去主线程为 coverage() 开的那条 ⇒ 5 条工作线程
+        assert_eq!(connections_within(20 * 1_000_000_000), 5);
+    }
+
+    #[test]
+    fn the_cap_does_not_bind_on_the_farm() {
+        // 这一条是防止误解的：`hep_sub -mem 20000` 并不压地址空间，那一档下
+        // `ulimit -v` 实测仍是 95 GB。95 GB 放得下 32 条，而 affinity 只给 24,
+        // 所以这道闸在农场上不会合上——农场那个无声被杀是 RSS 超 -mem，
+        // 只能靠 BLINK_THREADS 挡。
+        assert!(connections_within(95 * 1_000_000_000) > 24);
+    }
+
+    #[test]
+    fn a_cramped_address_space_still_yields_one_connection() {
+        // 给不出余量也要让程序跑起来，由内核去拒绝，而不是在这里算出 0 条
+        assert_eq!(connections_within(1 << 30), 1);
+        assert_eq!(connections_within(0), 1);
     }
 }
