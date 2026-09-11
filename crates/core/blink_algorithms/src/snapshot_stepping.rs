@@ -1,6 +1,5 @@
 use crate::{constants::DAYS_PER_YEAR, types::candidate::Candidate};
 use blink_core::{traits::Event, types::MissionElapsedTime};
-use statrs::distribution::{DiscreteCDF, Poisson};
 use std::cmp::Ordering;
 use statrs::function::gamma::ln_gamma;
 use uom::si::f64::*;
@@ -270,18 +269,25 @@ pub fn search_new<E: Event>(
                                 let lambda = equivalent_background_number;
                                 let count = numbers[group] as f64;
                                 // 剪枝，严格等价，不是近似：
-                                //   sf(count) = P(X > count) >= P(X = count+1)
+                                //   sf(count) = P(X >= count) >= P(X = count)
                                 // 所以只要单项 PMF 已经不小于本组门槛，这一组的
                                 // 尾概率也不小于门槛，越不了线。此时返回 +inf 让它
                                 // 退出 min 的竞争 —— 真正触发时取到的最小值必然来自
                                 // 没被剪的组，那个值是精确算出来的，候选记录的显著性
                                 // 因此不受影响。省掉的全是注定不触发的不完全伽马。
-                                let ln_pmf = -lambda + (count + 1.0) * lambda.ln()
-                                    - ln_gamma(count + 2.0);
+                                //
+                                // 界必须跟着 `sf` 的语义走：2026-09-11 把 `sf` 从
+                                // `P(X > count)` 改成 `P(X >= count)`，下界的 PMF
+                                // 也从 `count+1` 处挪到 `count` 处。留在 `count+1`
+                                // 处会把界取松（`P(X=count+1) < P(X=count)`），
+                                // 剪枝失效但不出错；反过来 `sf` 没改而界用 `count`，
+                                // 才会剪掉本该触发的组。
+                                let ln_pmf =
+                                    -lambda + count * lambda.ln() - ln_gamma(count + 1.0);
                                 if ln_pmf >= ln_group_threshold {
                                     f64::INFINITY
                                 } else {
-                                    Poisson::new(lambda).unwrap().sf(numbers[group] as u64)
+                                    crate::poisson::sf(lambda, numbers[group])
                                 }
                             }
                         }
