@@ -85,6 +85,33 @@ def ladder(hdus):
     length = int(broken[0]) + 1 if broken.size else e_min.size
     above = np.flatnonzero(e_max[:length] > MIN_ENERGY_KEV)
     return (int(above[0]) if above.size else length), length
+def merge_gain_pairs(time, gain, dead_time_us):
+    """同探头双增益配对，返回"留下哪些"的布尔掩模。
+
+    输入必须已按 `time` 排好。逐事例贪心：对每条还没被配掉的事例 `a`，向后扫
+    时戳差 <= `dead_time_us[a]` 的窗，取第一条增益档与它相反、且同样没被配掉的
+    `b`，把这一对里的高增益那条丢掉、低增益那条留下（`GAIN_TYPE` 0 高 1 低），
+    两条都标记为已配、不再参与后面的配对。
+
+    与 Rust 侧 `dedupe_gain_pairs` 同语义。**不要退回「时戳相等」那个旧口径**，
+    它只覆盖真实重复的约 85%。
+    """
+    n = time.size
+    keep = np.ones(n, bool)
+    paired = np.zeros(n, bool)
+    for a in range(n):
+        if paired[a]:
+            continue
+        limit = time[a] + dead_time_us[a] * 1e-6
+        b = a + 1
+        while b < n and time[b] <= limit:
+            if not paired[b] and gain[b] != gain[a]:
+                paired[a] = paired[b] = True
+                # 丢掉高增益（GAIN_TYPE == 0）那条，它可能已经饱和
+                keep[a if gain[a] == 0 else b] = False
+                break
+            b += 1
+    return keep
 
 
 def read_events(path, want_pi):
@@ -100,6 +127,19 @@ def read_events(path, want_pi):
     一个 EVENTS 表就是一路探头，所以表内的同时戳天然就是同探头同时戳。
     保留高 `GAIN_TYPE`（低增益）那条，与 Rust 侧 `dedupe_gain_pairs` 同规则：
     高增益支路会饱和，低增益那条永远是有效测量。
+
+    **配对判据是「死时间内」，不是「时戳相等」。** 两条支路给同一个物理光子
+    打的时戳差是一个约 100 ns 的电子学固定延迟（见 OPEN-QUESTIONS 第 18 条），
+    落在归档的 float64 格子上表现为 0 步、3 步或 4 步，**只有约 85% 恰好为零**。
+    按时戳相等配会漏掉 15–16%：GECAM-C 实测两个口径是 1,735,222 对 vs
+    1,325,000 对，**23.65% 的对时戳并不相等**。拿时戳相等的口径重算新产物，
+    `n_core` 会系统性多于搜索报的 `count`，对不上账。
+
+    这里用逐事例贪心，与 Rust 侧同语义：按时戳排序后，对每条未配对的事例向后
+    找第一条同增益档相反、且时戳差在它自己的 `DEAD_TIME` 之内的，配成一对、
+    两条都退出。（C 星实测「只认相邻一对的全向量化版」与逐事例贪心在
+    1,735,222 次合并里只差 77 次 = 0.0044%，总数差 1，所以向量化版也可用；
+    但对账要 100.00% 就走贪心。）
     """
     times, channels, detectors = [], [], []
     with fits.open(path) as hdus:
@@ -117,13 +157,15 @@ def read_events(path, want_pi):
             channel = pi[keep] if want_pi else np.zeros(int(keep.sum()), int)
             # CPD 没有 GAIN_TYPE 这一列，也没有双增益支路，不做合并
             gain = np.asarray(data["GAIN_TYPE"])[keep] if "GAIN_TYPE" in data.names else None
-            if gain is not None and time.size:
-                # 先按时戳排、同时戳内按增益档从高到低排，每个时戳留第一条
-                order = np.lexsort((-gain.astype(np.int16), time))
+            dead = (
+                np.asarray(data["DEAD_TIME"], float)[keep] if "DEAD_TIME" in data.names else None
+            )
+            if gain is not None and dead is not None and time.size:
+                order = np.argsort(time, kind="stable")
                 time, channel = time[order], channel[order]
-                duplicate = np.zeros(time.size, bool)
-                duplicate[1:] = time[1:] == time[:-1]
-                time, channel = time[~duplicate], channel[~duplicate]
+                gain, dead = gain[order], dead[order]
+                keep_mask = merge_gain_pairs(time, gain, dead)
+                time, channel = time[keep_mask], channel[keep_mask]
             times.append(time)
             channels.append(channel)
             detectors.append(np.full(time.size, int(hdu.name[-2:])))
