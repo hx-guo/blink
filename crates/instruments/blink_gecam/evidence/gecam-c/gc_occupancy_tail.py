@@ -33,6 +33,9 @@ MIN_ENERGY_KEV, NORMAL = 40.0, 1
 WIDTHS = (1e-7, 1e-6, 1e-5, 1e-4, 1e-3)
 # C 星候选的 count 中位是 8–9（`min_number = 8` 是搜索的下限）。
 MEDIAN_K = 9
+# 逐段算 Fano 的段长。**整小时算出来的 Fano 掺着轨道尺度的速率漂移**，
+# 而跨仪器比 Fano 时段长必须一致，否则比的不是同一个量。GECAM-B 用的是 10 s。
+SEGMENT_SECONDS = float(os.environ.get("SEGMENT_SECONDS", "10"))
 
 
 def ladder(hdus, min_energy_kev=MIN_ENERGY_KEV):
@@ -154,6 +157,72 @@ def tail_from_hist(hist, k):
     return int(hist[k:].sum()) if k < hist.size else 0
 
 
+def segmented_tail(time, gti_a, gti_b, width, segment_seconds, k_max=40):
+    """逐段用**该段自己的 λ** 算泊松期望，再把各段加起来。
+
+    **整小时一个 λ 是错的口径**：搜索用的是候选两侧各 0.5 s 的本底窗，λ 是
+    **局部的**；而一小时里速率有轨道尺度的漂移，**拿全小时的 λ 去比，会把
+    速率漂移算成过离散**，把尾比系统性高估。分段之后每段内速率近似平稳，
+    剩下的才是真正的成团。
+
+    返回 `(实测 ≥k 的格数, 局部泊松期望的格数, 总格数)` 三个数组，下标即 `k`。
+    """
+    observed = np.zeros(k_max + 1)
+    expected = np.zeros(k_max + 1)
+    total_bins = 0
+    ks = np.arange(k_max + 1)
+    for a, b in zip(gti_a, gti_b):
+        start = a
+        while start + segment_seconds <= b:
+            n_bins = int(segment_seconds // width)
+            if n_bins >= 2:
+                total_bins += n_bins
+                lo = np.searchsorted(time, start, "left")
+                hi = np.searchsorted(time, start + n_bins * width, "left")
+                lam = (hi - lo) / n_bins
+                if hi > lo:
+                    idx = ((time[lo:hi] - start) / width).astype(np.int64)
+                    _, per_bin = np.unique(idx, return_counts=True)
+                    hist = np.bincount(per_bin, minlength=k_max + 1)[: k_max + 1]
+                    observed += hist[::-1].cumsum()[::-1]
+                expected += n_bins * stats.poisson.sf(ks - 1, lam)
+            start += segment_seconds
+    return observed, expected, total_bins
+
+
+def segmented_fano(time, gti_a, gti_b, width, segment_seconds):
+    """把活时间切成 `segment_seconds` 的段，逐段算 Fano（方差/均值），返回中位。
+
+    **整小时算出来的 Fano 不能直接当"成团强度"**：一小时里速率有轨道尺度的漂移，
+    **速率非平稳本身就会抬高 Fano，而且越往大 `W` 越抬**。复合泊松在
+    `W ≫ 簇宽`（实测簇宽 p50 = 60 ns / p99 = 149 ns）之后 Fano 应当进平台、
+    不该一路涨；**涨了就要先排除段长**。
+
+    Fano 只需要一阶与二阶矩，不必把每格的计数实体化：
+    `mean = S1/n`、`var = S2/n − mean²`，其中 `S2` 只有非空格有贡献。
+    """
+    values = []
+    for a, b in zip(gti_a, gti_b):
+        start = a
+        while start + segment_seconds <= b:
+            stop = start + segment_seconds
+            n_bins = int(segment_seconds // width)
+            if n_bins >= 2:
+                lo = np.searchsorted(time, start, "left")
+                hi = np.searchsorted(time, start + n_bins * width, "left")
+                s1 = hi - lo
+                if s1 > 0:
+                    idx = ((time[lo:hi] - start) / width).astype(np.int64)
+                    _, per_bin = np.unique(idx, return_counts=True)
+                    s2 = float((per_bin.astype(float) ** 2).sum())
+                    mean = s1 / n_bins
+                    var = s2 / n_bins - mean * mean
+                    if mean > 0:
+                        values.append(var / mean)
+            start = stop
+    return (float(np.median(values)), len(values)) if values else (float("nan"), 0)
+
+
 def main():
     args = sys.argv[1:]
     for day, hour in zip(args[::2], args[1::2]):
@@ -176,21 +245,30 @@ def main():
             k_values = np.arange(hist.size)
             lam = float((hist * k_values).sum()) / total_bins
             variance = float((hist * (k_values - lam) ** 2).sum()) / total_bins
-            print(f"\n  窗宽 W = {width * 1e6:g} µs   格数 {total_bins:,}   "
-                  f"λ = {lam:.4g}   实测方差/均值 = {variance / max(lam, 1e-12):.3f}"
-                  f"（泊松应为 1）")
-            print("    k    实测 ≥k 的格数   实测尾概率    泊松尾概率     **比值**")
+            fano_whole = variance / max(lam, 1e-12)
+            fano_seg, n_seg = segmented_fano(time, gti_a, gti_b, width, SEGMENT_SECONDS)
+            print(f"\n  窗宽 W = {width * 1e6:g} µs   格数 {total_bins:,}   λ = {lam:.4g}")
+            print(f"    Fano：整小时 {fano_whole:.3f}   "
+                  f"逐 {SEGMENT_SECONDS:g} s 段的中位 {fano_seg:.3f}"
+                  f"（{n_seg} 段）   泊松应为 1")
+            obs_seg, exp_seg, bins_seg = segmented_tail(
+                time, gti_a, gti_b, width, SEGMENT_SECONDS
+            )
+            print("    k    实测 ≥k 的格数   全小时单一 λ 的比值   "
+                  f"逐 {SEGMENT_SECONDS:g} s 局部 λ 的比值")
             shown = 0
             for k in range(2, 41):
                 n_ge = tail_from_hist(hist, k)
                 if n_ge == 0:
                     break
-                empirical = n_ge / total_bins
-                poisson = float(stats.poisson.sf(k - 1, lam))
-                ratio = empirical / poisson if poisson > 0 else float("inf")
+                whole = (n_ge / total_bins) / float(stats.poisson.sf(k - 1, lam))
+                local = (
+                    obs_seg[k] / exp_seg[k]
+                    if k < exp_seg.size and exp_seg[k] > 0
+                    else float("nan")
+                )
                 mark = "  ← 候选 k 中位" if k == MEDIAN_K else ""
-                print(f"   {k:3d}   {n_ge:14,}   {empirical:.3e}   {poisson:.3e}   "
-                      f"{ratio:12.3g}{mark}")
+                print(f"   {k:3d}   {n_ge:14,}   {whole:19.3g}   {local:19.3g}{mark}")
                 shown += 1
                 if shown >= 12 and k >= MEDIAN_K:
                     break
