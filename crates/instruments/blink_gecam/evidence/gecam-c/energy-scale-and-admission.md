@@ -291,7 +291,11 @@ CPD 空壳（零列） 217 小时      GRD 空壳（零列） 206 小时
 
 | 文件 | 作用 |
 |---|---|
-| `gc_ladder_scan.py` | 全任务逐小时点 EBOUNDS，按 `verify` 的哪一道闸失败分类 |
+| `gc_ladder_scan.py` | 全任务逐小时点 EBOUNDS，按**修复前**那道闸的哪一条失败分类（旧账，别改它去追新加载器） |
+| `gc_ladder_rows.py` | 逐日点 EBOUNDS 的行数与梯长，找细梯纪元（A/B/C 通用） |
+| `gc_probe_ladder.py` | 指定文件按新规则现算梯长、梯顶、能阈道，逐个 epoch 核对 |
+| `gc_dupe_inwindow.py` | 候选窗内的偶然配对率（窗内均匀重抽），双增益与跨探头 τ 两套 |
+| `gc_posatt_radius.py` | POSATT 地心距分布——C 星的坏行自检只能用这条，看 \|磁纬\| 超不超倾角不灵敏 |
 | `gc_stub_scan.py` | 找零行零列的空壳事例文件，分出"CPD 空壳拖死好 GRD"那一类 |
 | `gc_dedupe.py` | 逐事例贪心去重与全向量化版的等价性检验（差 0.0044%） |
 | `gc_feat.py` | 候选的事例级特征，去重按死时间口径，与 `count` 逐条对账 |
