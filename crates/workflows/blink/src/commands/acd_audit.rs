@@ -8,6 +8,8 @@
 //! `det_window`/`det_baseline`——18 路探头在候选窗与基线窗内的计数，
 //! `|` 分隔、下标即 Det_ID（0..17）。逐路向量原本只在搜索现场取得到；
 //! 这两列让冻结的目录不重跑搜索也能补上，两列之和分别恒等于 `n` 与 `n_bg`。
+//! 再加 `bg_max_gap`——基线窗内最长的无事例间隔（秒），直接量"本底窗有没有伸进
+//! 数据缺口"，与 `n_bg` 配套：泊松下的期望是 `ln(n_bg) / (n_bg / 1.98)`。
 //! 事例选择与窗口定义复用搜索侧同一实现（`blink_hxmt_he::algorithms::acd`），
 //! 两边数字可直接互校。需在能访问 1K 档案的机器上运行。
 
@@ -15,6 +17,7 @@ use blink_algorithms::detector_share::max_detector_fraction;
 use blink_core::traits::Event as _;
 use blink_core::types::MissionElapsedTime;
 use blink_hxmt_he::algorithms::acd::acd_counts;
+use blink_hxmt_he::algorithms::baseline_gap::baseline_max_gap;
 use blink_hxmt_he::algorithms::detectors::detector_counts;
 use blink_hxmt_he::io::level_1k::EventFile;
 use blink_hxmt_he::types::{Event, HxmtHe};
@@ -82,6 +85,7 @@ pub fn cmd_acd_audit(list: &Path, out: &Path, scint: &str) {
         counts: Option<blink_core::types::AcdCounts>,
         det_share_max: Option<f64>,
         detectors: Option<blink_core::types::DetectorCounts>,
+        bg_max_gap: Option<f64>,
     }
     let mut rows: Vec<Row> = lines
         .filter(|line| !line.trim().is_empty())
@@ -97,6 +101,7 @@ pub fn cmd_acd_audit(list: &Path, out: &Path, scint: &str) {
                 counts: None,
                 det_share_max: None,
                 detectors: None,
+                bg_max_gap: None,
             }
         })
         .collect();
@@ -137,6 +142,7 @@ pub fn cmd_acd_audit(list: &Path, out: &Path, scint: &str) {
                 MissionElapsedTime::new(stop),
                 |e| e.detector.id,
             ));
+            rows[index].bg_max_gap = Some(baseline_max_gap(&events, start, stop));
         }
         if (i + 1) % 50 == 0 || i + 1 == n_hours {
             eprintln!("acd-audit: {}/{n_hours} hours", i + 1);
@@ -145,13 +151,15 @@ pub fn cmd_acd_audit(list: &Path, out: &Path, scint: &str) {
 
     let mut output = String::with_capacity(content.len() * 2);
     output.push_str(header);
-    output.push_str(",n,n_acd,n_acd_multi,n_bg,n_acd_bg,det_share_max,det_window,det_baseline\n");
+    output.push_str(
+        ",n,n_acd,n_acd_multi,n_bg,n_acd_bg,det_share_max,det_window,det_baseline,bg_max_gap\n",
+    );
     let mut n_unresolved = 0usize;
     for row in &rows {
         output.push_str(row.line);
         match &row.counts {
             Some(c) => output.push_str(&format!(
-                ",{},{},{},{},{},{:.3},{},{}\n",
+                ",{},{},{},{},{},{:.3},{},{},{:.6}\n",
                 c.n,
                 c.n_acd,
                 c.n_acd_multi,
@@ -160,10 +168,11 @@ pub fn cmd_acd_audit(list: &Path, out: &Path, scint: &str) {
                 row.det_share_max.unwrap_or(f64::NAN),
                 join_counts(row.detectors.as_ref().map(|d| d.window.as_slice())),
                 join_counts(row.detectors.as_ref().map(|d| d.baseline.as_slice())),
+                row.bg_max_gap.unwrap_or(f64::NAN),
             )),
             None => {
                 n_unresolved += 1;
-                output.push_str(",,,,,,,,\n");
+                output.push_str(",,,,,,,,,\n");
             }
         }
     }
