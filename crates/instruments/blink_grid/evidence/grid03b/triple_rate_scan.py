@@ -51,6 +51,10 @@ POLE_LAT, POLE_LON = np.radians(80.7), np.radians(-72.7)
 MLAT_EDGES = np.arange(0, 92, 2.0)
 # io/posatt.rs::MAX_SAMPLE_GAP_SECONDS
 MAX_GAP_S = 30.0
+# 位置坏行的物理半径带（见 load_posatt）。03B/04/07 是 SSO 约 500 km、02 约 55° 倾角低轨；
+# 硬带取整个 LEO，窄带再按本文件高度中位数收。
+ALT_BAND_KM = (150.0, 1500.0)
+ALT_SPREAD_KM = 100.0
 
 
 def dipole_lat(lat_deg, lon_deg):
@@ -82,7 +86,16 @@ def blacklisted(sat, day):
 
 
 def load_posatt(sat, ymd, span):
-    """位姿里有位置解的行：(met, |偶极磁纬|)；一行都没有返回 None。"""
+    """位姿里有位置解**且地心距落在本星轨道窄带内**的行：(met, |偶极磁纬|)。
+
+    只筛 NaN 不够。全队实测：POSATT 里有 `X = Y = Z = 0` 一类的坏行，一天 1565 行；
+    **按 `|r|` 非零过滤仍放过 36 行**（地心距 1362–9060 km），造出 |磁纬| 87° 的假点。
+    判据要用**物理半径带**——地心距必须落在该星轨道的窄带内。天格是太阳同步、倾角
+    97–98°，"纬度超过倾角"这条自检不灵敏（极区本来就到得了），只能看高度。
+
+    两层：先夹死物理上不可能的（LEO 硬带），再按本文件高度中位数 ±100 km 掐掉离群行
+    （圆轨道，一次过境内高度变化只有几十 km）。
+    """
     hits = sorted(glob.glob(ARCH.format(sat=sat) + "/fits8/%s/posatt_*/*%s*" % (ymd, span)))
     if not hits:
         return None
@@ -91,9 +104,16 @@ def load_posatt(sat, ymd, span):
         t = np.asarray(d["TIME"], dtype=np.float64)
         lat = np.asarray(d["Latitude"], dtype=np.float64)
         lon = np.asarray(d["Longitude"], dtype=np.float64)
+        alt_km = np.asarray(d["Altitude"], dtype=np.float64) / 1000.0
     except Exception:
         return None
-    ok = np.isfinite(t) & np.isfinite(lat) & np.isfinite(lon)
+    ok = (np.isfinite(t) & np.isfinite(lat) & np.isfinite(lon) & np.isfinite(alt_km)
+          & (alt_km >= ALT_BAND_KM[0]) & (alt_km <= ALT_BAND_KM[1])
+          & (np.abs(lat) <= 90.0) & (np.abs(lon) <= 360.0))
+    if ok.sum() < 2:
+        return None
+    med = np.median(alt_km[ok])
+    ok &= np.abs(alt_km - med) <= ALT_SPREAD_KM
     if ok.sum() < 2:
         return None
     return t[ok], np.abs(dipole_lat(lat[ok], lon[ok]))
@@ -150,7 +170,9 @@ def main():
     args = ap.parse_args()
     os.makedirs(args.outdir, exist_ok=True)
 
-    days = sorted(glob.glob(ARCH.format(sat=args.sat) + "/fits7/*/*/*"))[args.chunk::args.nchunk]
+    all_days = sorted(glob.glob(ARCH.format(sat=args.sat) + "/fits7/*/*/*"))
+    days = all_days[args.chunk::args.nchunk]
+    n_days = n_passes = 0
     nb = len(MLAT_EDGES) - 1
     acc_ev = np.zeros(nb)
     acc_in3 = np.zeros(nb)
@@ -170,7 +192,9 @@ def main():
         if not vers:
             continue
         ver = os.path.basename(vers[-1])
+        n_days += 1
         for path in sorted(glob.glob(vers[-1] + "/*.fits")):
+            n_passes += 1
             base = os.path.basename(path)
             try:
                 with fits.open(path, memmap=False) as hd:
@@ -260,7 +284,14 @@ def main():
                      % (MLAT_EDGES[i], MLAT_EDGES[i + 1], acc_s[i],
                         int(acc_ev[i]), int(acc_in3[i]), int(acc_k3[i])))
         mf.write("# no_position_seconds,%.1f\n" % no_pos_s)
-    print("chunk %d done" % args.chunk)
+
+    # 完成标记：worker 跑完才写。汇总入口要硬断言 Σdays_done == days_expected，
+    # 不能等非零退出——"队列空 ≠ 跑完"，残缺输入上跑完整条链不会报错。
+    with open(os.path.join(args.outdir, "done_%02d.txt" % args.chunk), "w") as df:
+        df.write("sat,%s\nchunk,%d\nnchunk,%d\n"
+                 "days_expected,%d\ndays_done,%d\npasses,%d\nno_position_seconds,%.1f\n"
+                 % (args.sat, args.chunk, args.nchunk, len(days), n_days, n_passes, no_pos_s))
+    print("chunk %d done: %d/%d days, %d passes" % (args.chunk, n_days, len(days), n_passes))
 
 
 if __name__ == "__main__":
