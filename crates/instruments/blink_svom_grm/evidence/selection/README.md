@@ -23,8 +23,11 @@
 SVOM 的关联率整体高于 HXMT，与它有效面积小、只看得见亮 TGF（母闪电也更强、WWLLN 更易探测）一致。
 
 - `fa_correction.txt`：**`fa` 的单边 p 差一个**（第 35 条）。`poisson::sf` 返回
-  P(X > count)，正确的是 P(X ≥ count)。SVOM 的改正因子中位 6.54（λ 中位 4.37，
-  比 λ 小的仪器轻得多）；fa ≤ 1e-5 上 899 → 835（出 64 进 0）；
-  **改正因子随 fa 几乎是平的（斜率 −0.0070），幂律指数只动 0.7%，
-  所以第 15 条那条腿保住了**。单组近似，精确值要重跑搜索。
-  生成：`scripts/diag_svom_fa_correction.py`。
+  P(X > count)，正确的是 P(X ≥ count)。SVOM 改正因子中位 **17.69**（λ 中位 0.640）；
+  fa ≤ 1e-5 上 897 → 782（出 115 进 0）。**改正因子随 fa 单调漂 4 倍，不是刚性平移**，
+  但第 15 条引用的两个幂律指数几乎不动（TGF 段 0.0391 → 0.0398、关联 0.0306 → 0.0298）。
+  含两条对账（`sf` 列 vs 复算的 P(X>count) 差 1.9e-14；`sf/fa×年` 反推的
+  bin_size_best 最大 0.000999987 s，对上 1 ms 上限）。
+  生成：`scripts/cluster/svom_fa_correction.py` 与 `svom_powerlaw_fa_fixed.py`，
+  输入必须是 `svomrun8/tgfs.json` 的 count/mean/sf——**不能用特征表的 dur_ms 与
+  rate_bkg 重建 λ，那是 merge 后的包络和另一个本底窗，会错两个量级以上**。
