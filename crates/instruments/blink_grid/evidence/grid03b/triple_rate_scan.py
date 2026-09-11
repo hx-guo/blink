@@ -51,7 +51,8 @@ POLE_LAT, POLE_LON = np.radians(80.7), np.radians(-72.7)
 MLAT_EDGES = np.arange(0, 92, 2.0)
 # io/posatt.rs::MAX_SAMPLE_GAP_SECONDS
 MAX_GAP_S = 30.0
-# 位置坏行的物理半径带（见 load_posatt）。03B/04/07 是 SSO 约 500 km、02 约 55° 倾角低轨；
+# 位置坏行的物理半径带（见 load_posatt）。**四颗星全是太阳同步轨道**（实测倾角 97.3–97.6°，
+# 02 = 97.366°；先前流传的「02 倾角约 55°、非 SSO」已证伪），高度约 500 km；
 # 硬带取整个 LEO，窄带再按本文件高度中位数收。
 ALT_BAND_KM = (150.0, 1500.0)
 ALT_SPREAD_KM = 100.0
