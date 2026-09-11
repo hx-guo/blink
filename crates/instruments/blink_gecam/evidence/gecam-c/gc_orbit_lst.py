@@ -30,6 +30,20 @@ EPOCH = dt.datetime(2021, 1, 1, tzinfo=dt.timezone.utc)
 A, F = 6378137.0, 1 / 298.257223563
 POLE_LAT, POLE_LON = np.radians(80.65), np.radians(-72.68)
 
+# POSATT 坏行的判据：**地心距落在物理高度带之外**（这里取 300–900 km，
+# 覆盖任何近地轨道，不是按 C 星实测调出来的窗）。
+#
+# **`|r| > 0` 或 `|r| > 1e6` 这类判据不够。** GECAM-B 实测一天 75,971 行里 1,565
+# 行是坏的而**精确为零的一行都没有**；大多是反常规格化浮点垃圾（`|r| > 1e6`
+# 挡得住），但**有 36 行的 |r| 落在 1362 / 3150 / 5434 / 9060 km，外加一行
+# 2.49e22 m，全都通过了 `|r| > 1e6`**。后果是那天算出 |磁纬| 最大 87.13°，
+# 而 B 星倾角只有 29°。零行造的是**假升交点**，这批造的是**假高纬点**——
+# 不改升交点，改的是纬度分档的归属。两种都要挡。
+R_MIN, R_MAX = A + 300e3, A + 900e3
+# 升交点插值只认时间上真正相邻的两点。坏行剔掉之后数组会留缝，跨缝插值会
+# 造出既非升交也非降交的假交点。
+MAX_NODE_GAP_SECONDS = 30.0
+
 
 def geodetic(x, y, z):
     e2 = F * (2 - F)
@@ -80,6 +94,7 @@ def main():
 
     nodes = []          # (met, lst) 升交点
     samples = []        # (lst, mlat)
+    dropped = kept = 0  # POSATT 坏行 / 好行
     for k, day_dir in enumerate(days):
         tag = day_dir[-10:].replace("/", "-")
         # 一天里取三个小时就够定升交点漂移（一圈约 95 分钟，一小时至少半圈）
@@ -98,12 +113,25 @@ def main():
                 continue
             if met.size < 100:
                 continue
+            # 坏行先剔掉，再算任何几何量
+            radius = np.sqrt(x * x + y * y + z * z)
+            good = np.isfinite(radius) & (radius >= R_MIN) & (radius <= R_MAX)
+            dropped += int((~good).sum())
+            kept += int(good.sum())
+            if good.sum() < 100:
+                continue
+            met, x, y, z = met[good], x[good], y[good], z[good]
             lat, lon = geodetic(x, y, z)
             lst = local_solar_time(met, lon)
             mlat = dipole_lat(lat, lon)
 
-            # 升交点：纬度由负转正的相邻两点，线性插到 lat = 0
-            up = np.flatnonzero((lat[:-1] < 0) & (lat[1:] >= 0))
+            # 升交点：纬度由负转正的相邻两点，线性插到 lat = 0。
+            # 剔掉坏行之后数组会留缝，跨缝的那一对不是真的相邻，不能插。
+            up = np.flatnonzero(
+                (lat[:-1] < 0)
+                & (lat[1:] >= 0)
+                & (met[1:] - met[:-1] <= MAX_NODE_GAP_SECONDS)
+            )
             for i in up:
                 w = -lat[i] / (lat[i + 1] - lat[i])
                 m = met[i] + w * (met[i + 1] - met[i])
@@ -125,6 +153,11 @@ def main():
                                  f"{ls:.4f}", f"{ml:.2f}"])
         if (k + 1) % 100 == 0:
             print(f"  {k+1}/{len(days)} 天，升交点 {len(nodes)}", flush=True)
+
+    total = dropped + kept
+    print(f"\nPOSATT 行：好 {kept}，坏 {dropped}"
+          f"（{dropped / total * 100:.4f}%，判据是地心距落在 "
+          f"{(R_MIN - A) / 1e3:.0f}–{(R_MAX - A) / 1e3:.0f} km 高度带之外）")
 
     nodes = np.array(nodes)
     print(f"\n升交点 {len(nodes)} 个")

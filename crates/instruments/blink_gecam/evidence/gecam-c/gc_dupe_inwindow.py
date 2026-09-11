@@ -164,6 +164,11 @@ def load_hour(path, override=None):
 # 0.5 把密度翻倍（问"窗内结构更陡会怎样"），10.0 把密度降十倍（灵敏度检验）。
 SPREADS = (1.0, 0.5, 10.0)
 
+# 按窗长分两档报。**窗比 τ 还短的时候"偶然"这个词就没有意义了**——整窗都在
+# τ 之内，撒哪儿都成对，真与偶然必然相等。这类窗在 C 星池里占一成上下，
+# 混在一起报会把两件不同的事平均成一个没法解释的数。
+SHORT_WINDOW_SECONDS = 1e-6
+
 
 def main():
     signals = json.load(open(sys.argv[1]))
@@ -178,15 +183,21 @@ def main():
     for signal in signals:
         by_hour.setdefault(signal["start"][:13], []).append(signal)
 
-    windows = 0
-    raw_events = 0            # 窗内通过准入的原始事例（去重前）
-    real_merges = 0           # 窗内真配到的对
-    real_cross = 0            # 窗内跨探头 ≤ τ 的对
-    # 同样窗内、时戳均匀重抽后配到的对（偶然），逐密度档
-    null_merges = {s: 0.0 for s in SPREADS}
-    null_cross = {s: 0.0 for s in SPREADS}
-    window_seconds = 0.0
-    reconciled = 0            # 去重后窗内事例数 == 搜索报的 count 的窗数
+    # 两档窗各自一套账：`long` 是窗长 > τ 那一档（偶然有意义），
+    # `short` 是窗比 1 µs 还短那一档（整窗都在 τ 之内，真与偶然必然相等）。
+    def tally():
+        return {
+            "windows": 0,
+            "raw_events": 0,
+            "window_seconds": 0.0,
+            "reconciled": 0,
+            "real_merges": 0,
+            "real_cross": 0,
+            "null_merges": {s: 0.0 for s in SPREADS},
+            "null_cross": {s: 0.0 for s in SPREADS},
+        }
+
+    books = {"long": tally(), "short": tally()}
 
     for hour_key in sorted(by_hour)[:limit]:
         group = by_hour[hour_key]
@@ -218,19 +229,20 @@ def main():
             w_dead = dead[lower:upper]
             n = w_time.size
 
-            windows += 1
+            book = books["short" if t1 - t0 <= SHORT_WINDOW_SECONDS else "long"]
+            book["windows"] += 1
             hour_windows += 1
-            raw_events += n
+            book["raw_events"] += n
             hour_raw += n
-            window_seconds += t1 - t0
+            book["window_seconds"] += t1 - t0
 
             real = merges_in_window(w_time, w_unit, w_gain, w_dead)
-            real_merges += real
+            book["real_merges"] += real
             hour_real += real
-            real_cross += cross_detector_pairs(w_time, w_unit)
+            book["real_cross"] += cross_detector_pairs(w_time, w_unit)
             # 去重后窗内还剩几条，与搜索报的 count 对账
             if n - real == signal["count"]:
-                reconciled += 1
+                book["reconciled"] += 1
 
             # 偶然：时戳在同一个窗内均匀重抽，标签跟着事例走
             for spread in SPREADS:
@@ -243,8 +255,8 @@ def main():
                         drawn[order], w_unit[order], w_gain[order], w_dead[order]
                     )
                     cross_here += cross_detector_pairs(drawn[order], w_unit[order])
-                null_merges[spread] += null_here / draws
-                null_cross[spread] += cross_here / draws
+                book["null_merges"][spread] += null_here / draws
+                book["null_cross"][spread] += cross_here / draws
                 if spread == 1.0:
                     hour_null += null_here / draws
 
@@ -254,32 +266,44 @@ def main():
             flush=True,
         )
 
-    if not windows:
+    if not any(book["windows"] for book in books.values()):
         print("没有可用的窗")
         return
 
     if override:
         print(f"\n⚠ 准入口径被覆盖成 能阈道 {override[0]} / 梯长 {override[1]}（对照用）")
-    print(f"\n候选窗 {windows} 个，合计窗长 {window_seconds * 1e3:.3f} ms")
-    print(f"对账：去重后窗内事例数 == 搜索报的 count 的窗 {reconciled}/{windows}"
-          f" = {reconciled / windows * 100:.2f}%")
-    print(f"窗内密度 {raw_events / window_seconds:.3e} c/s"
-          f"（窗内原始事例 {raw_events}，平均每窗 {raw_events / windows:.2f} 条）")
 
-    for title, real, null in (
-        ("双增益去重（同探头、死时间窗内、一高一低）", real_merges, null_merges),
-        (f"跨探头合并 τ = {CROSS_DETECTOR_TAU * 1e9:.0f} ns", real_cross, null_cross),
-    ):
-        print(f"\n{title}")
-        print(f"  窗内真配到的对   {real}")
-        for spread in SPREADS:
-            label = {1.0: "本体", 0.5: "半窗（密度 ×2）", 10.0: "十窗（密度 ÷10）"}[spread]
-            share = null[spread] / real * 100 if real else float("nan")
-            print(f"  偶然 · {label:16s} {null[spread]:9.1f}   占真配对 {share:6.2f}%")
-
-    print(f"\n双增益去重每窗误并 {null_merges[1.0] / windows:.4f} 条（本体档），"
-          f"窗内计数因此被压低 "
-          f"{null_merges[1.0] / max(raw_events - real_merges, 1) * 100:.2f}%")
+    for name, book in books.items():
+        windows = book["windows"]
+        if not windows:
+            continue
+        head = ("窗长 > 1 µs" if name == "long"
+                else f"窗长 ≤ 1 µs（比 τ = {CROSS_DETECTOR_TAU * 1e9:.0f} ns 只长几倍）")
+        print(f"\n{'=' * 8} {head}：{windows} 个窗 {'=' * 8}")
+        print(f"合计窗长 {book['window_seconds'] * 1e3:.3f} ms，"
+              f"窗内原始事例 {book['raw_events']}（平均每窗 "
+              f"{book['raw_events'] / windows:.2f} 条），"
+              f"密度 {book['raw_events'] / book['window_seconds']:.3e} c/s")
+        print(f"对账：去重后窗内事例数 == 搜索报的 count 的窗 "
+              f"{book['reconciled']}/{windows} = {book['reconciled'] / windows * 100:.2f}%")
+        for title, real, null in (
+            ("双增益去重（同探头、死时间窗内、一高一低）",
+             book["real_merges"], book["null_merges"]),
+            (f"跨探头合并 τ = {CROSS_DETECTOR_TAU * 1e9:.0f} ns",
+             book["real_cross"], book["null_cross"]),
+        ):
+            print(f"  {title}")
+            print(f"    窗内真配到的对   {real}")
+            for spread in SPREADS:
+                label = {1.0: "本体", 0.5: "半窗（密度 ×2）",
+                         10.0: "十窗（密度 ÷10）"}[spread]
+                share = null[spread] / real * 100 if real else float("nan")
+                print(f"    偶然 · {label:16s} {null[spread]:9.1f}   "
+                      f"占真配对 {share:6.2f}%")
+        survivors = max(book["raw_events"] - book["real_merges"], 1)
+        print(f"  双增益去重每窗误并 {book['null_merges'][1.0] / windows:.4f} 条"
+              f"（本体档），窗内计数因此被压低 "
+              f"{book['null_merges'][1.0] / survivors * 100:.2f}%")
 
 
 if __name__ == "__main__":
