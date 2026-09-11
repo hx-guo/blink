@@ -51,6 +51,53 @@ const SCALE_SANITY_FACTOR: f64 = 2.0;
 /// `R = ln2 / median(Δt)`，列车只压低少数间隔、压不动中位），两者差过
 /// `SCALE_SANITY_FACTOR` 倍就报警。这是判据不是数据完整性，所以只打警告、
 /// 既不静默降级也不 panic。
+/// 开几条工作线程。
+///
+/// **不能直接用 `available_parallelism()`**：它认 `sched_getaffinity` 与 cgroup
+/// 配额，**不认 `OMP_NUM_THREADS`**，农场作业里实测两者差 24 倍——`OMP_NUM_THREADS=1`
+/// 让 `nproc` 返回 1，而 affinity 仍是 24。而每条线程要开一条 WWLLN 连接、
+/// 各吃 2 GiB 虚拟地址空间（`RLIMIT_AS` 数的是虚拟地址空间，同一个文件映射
+/// N 次就占 N 份），于是一个**看起来单核**的作业会起 25 × 2 GiB = 50 GiB
+/// 地址空间，然后被无声杀掉——`.err` 是空的、没有任何报错。
+///
+/// 所以两道闸，**但两道挡的不是同一件事，别指望后一道能替前一道**：
+///
+/// * `BLINK_THREADS` 显式指定时一律听它的。**控制线程数不能靠 `taskset`
+///   也不能靠 `nproc`**，只能靠程序自己的参数，这就是那个参数。**农场上那个
+///   无声被杀的场景只能靠这一道**——见下。
+/// * 没有指定时，按 `RLIMIT_AS` 还能放下几条连接封顶。不设 `RLIMIT_AS` 的
+///   环境（开发机）维持原行为。
+///
+/// **第二道在农场上基本不触发，别误以为它兜住了。** `hep_sub -mem 20000`
+/// **并不压地址空间**，那一档下 `ulimit -v` 仍是 95 GB（实测，见
+/// `blink_lightning::database::mmap_budget` 的注释）：95 GB 放得下 32 条连接，
+/// 而 affinity 给的是 24，**闸不会合上**。那里杀掉作业的是 RSS 超 `-mem`，
+/// 不是地址空间。第二道只在有人真的 `ulimit -v` 设紧时才管用。
+///
+/// 线程数不影响结果：每条线程带原下标收回、最后按下标排序，顺序与串行一致。
+fn worker_threads() -> usize {
+    let detected = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(8);
+    if let Some(requested) = std::env::var("BLINK_THREADS")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .filter(|n| *n > 0)
+    {
+        return requested;
+    }
+    match blink_lightning::database::max_connections() {
+        Some(cap) if cap < detected => {
+            eprintln!(
+                "filter: 地址空间只放得下 {cap} 条 WWLLN 连接，线程数从 {detected} 压到 {cap}\
+                 （要自己指定用 BLINK_THREADS）"
+            );
+            cap
+        }
+        _ => detected,
+    }
+}
+
 fn train_threshold(times_us: &[i64], neighbors: &[u32]) -> u32 {
     if neighbors.is_empty() {
         return TRAIN_THRESHOLD;
@@ -299,9 +346,7 @@ pub fn run<I: Instrument>(window_ms: i64) {
     // 密度差几十倍（活跃季 ±62s 窗返回上万条闪电）。静态分块会严重失衡（空段线程
     // 早退、忙段线程拖尾），故用原子取号做工作窃取：每线程反复领下一个待处理下标，
     // 忙闲自动均衡，56 核吃满到最后。结果带原下标收回后排序，保持原顺序。
-    let n_threads = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(8);
+    let n_threads = worker_threads();
     let next = AtomicUsize::new(0);
     let done = AtomicUsize::new(0);
     let signals_ref = &signals;
