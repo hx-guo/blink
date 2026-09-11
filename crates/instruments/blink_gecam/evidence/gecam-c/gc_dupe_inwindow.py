@@ -1,18 +1,32 @@
-"""GECAM-C：双增益去重在**候选窗内**的偶然配对率。
+"""GECAM-C：双增益去重与跨探头合并在**候选窗内**的偶然配对率。
 
-全小时的偶然配对率是 4.16%（平移对照量出来的）。但候选窗是按"事例挤在一起"选出来的，
-窗内密度比全小时高几个数量级，**偶然配对率在那里必然更高**——而那才是"去重把多少真
-事例误并了"的数。这个数不能从全小时那个数推，要单独量。
+全小时的偶然配对率是 4.16%（低增益支路整体平移的对照量出来的）。**那个数在
+候选窗里用不了**：候选窗是按"事例挤在一起"选出来的，窗内密度比全小时高几个
+数量级，而偶然配对率随密度走。窗内才是"去重把多少真事例误并了"的所在。
 
-办法与全小时那一版同构，只是把统计范围收到候选窗内：
+**平移对照在窗内失效，不是精度问题是系统问题。** 平移 0.1–1 s 之后，候选窗里
+剩下的是暴发的高增益那一半加上别处来的低增益本底——窗内密度被平移本身破坏了，
+量到的是本底密度下的偶然率。所以这里换成**窗内均匀重抽**：
 
-* **真**：按死时间口径在原始流上配对，数有多少对的时戳落在某个候选窗里；
-* **偶然**：把低增益支路的时戳整体平移一个远大于死时间的常数，重排后再配一次，
-  数有多少对落在**同一批候选窗**里。平移之后配到的对全是偶然的。
+* **真**：取窗内通过准入的原始事例，按死时间口径配对（与 `gc_dedupe.adjacent`
+  同规则，逐探头做），数两条都落在窗内的对；
+* **偶然**：把这些事例的时戳在同一个窗内**均匀重抽**，标签（探头、增益、
+  死时间）原样跟着事例走，再配一次。事例数、窗长、探头与增益的边缘分布全部
+  原样保留，**只有时间上的符合结构被打掉**，配到的对因此全是偶然的。
 
-平移量取几个不同值，看结果稳不稳——单个平移量可能撞上周期性结构。
+**这个偶然数是下界，方向是单向的**：重抽假定事例在窗内均匀，而候选窗是最佳格、
+窗内本身可能还有更陡的结构；真结构越陡，偶然配对只会更多。下界有多松，用
+**密度对照**量出来而不是猜：同一批事例改撒在半个窗（密度 ×2）与十个窗
+（密度 ÷10）里各跑一遍。十倍那一档同时是这个估计量的灵敏度检验——**偶然数
+不随密度动的话，这个测量根本没有分辨力**。
 
-用法: gc_dupe_inwindow.py <signals.json> [小时数上限]
+同一套口径顺带量跨探头合并：**τ = 150 ns 固定**（底下是双增益两支路之间一个
+约 100 ns 的电子学固定延迟，量化步 q 只决定能不能分辨开，所以 τ 不随 q 缩）。
+
+用法: gc_dupe_inwindow.py <signals.json> [重抽次数=200] [小时数上限] [能阈道,梯长]
+
+最后一个参数是**准入口径的覆盖**，只用来做对照：把它设成 `54,448` 在 896 道
+纪元的小时上跑，对账会掉下来——那正是"照搬道号"错在哪里的正面证据。
 """
 
 import datetime as dt
@@ -29,7 +43,11 @@ EPOCH = (2021, 1, 1)
 # 能阈存能量、切的时候折成道号，折算逐文件做——见 `ladder()`。写死道号不行：
 # 归档里有两把能量梯，同一个道号在它们上面差一倍能量。
 MIN_ENERGY_KEV, NORMAL = 40.0, 1
-SHIFTS = (0.11, 0.37, 1.03)
+# 跨探头合并窗。**常数，不随量化步 q 变**：底下是一个约 100 ns 的电子学固定
+# 延迟，q 只决定它落在哪一格（C 星最细那段 q = 7.45 ns 上是 96.9 / 104.3 ns
+# 相邻两格）。若让 τ 随 q 缩到 30–60 ns，连那条线都盖不住。
+CROSS_DETECTOR_TAU = 150e-9
+
 
 def ladder(hdus, min_energy_kev=MIN_ENERGY_KEV):
     """从这个文件自己的 EBOUNDS 推出 (能阈道, 梯长)，与 Rust 侧同规则。
@@ -48,8 +66,8 @@ def ladder(hdus, min_energy_kev=MIN_ENERGY_KEV):
     return (int(above[0]) if above.size else length), length
 
 
-
 def met(iso):
+    """ISO → MET。小数秒整取，不能截到微秒——窗最短只有 0.015 µs。"""
     head, _, frac = iso.rstrip("Z").partition(".")
     stamp = dt.datetime.strptime(head, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=dt.timezone.utc)
     ref = dt.datetime(*EPOCH, tzinfo=dt.timezone.utc)
@@ -70,108 +88,222 @@ def newest(pattern):
     return best[1] if best else None
 
 
-def pair_times(time, gain, dead_s):
-    """相邻口径配对（与 gc_dedupe.adjacent 同规则），返回每对的时戳（取靠前那条）。"""
+def pairs_one_detector(time, gain, dead_s):
+    """一路探头内按死时间口径配对，返回配到的对数。
+
+    与 `gc_dedupe.adjacent` 同规则：只认时间序上相邻的一对，一段连续的候选对里
+    从左到右贪心取的就是起点开始隔一个的那些。**同探头**是硬前提——Rust 侧
+    `dedupe_gain_pairs` 要求 `detector_id` 相同，所以这个函数一次只喂一路。
+    """
     if time.size < 2:
-        return np.empty(0)
+        return 0
     ok = (gain[1:] != gain[:-1]) & (time[1:] - time[:-1] <= dead_s[:-1])
     if not ok.any():
-        return np.empty(0)
+        return 0
     idx = np.flatnonzero(ok)
     start = np.empty(idx.size, bool)
     start[0] = True
     start[1:] = idx[1:] != idx[:-1] + 1
     seg = np.maximum.accumulate(np.where(start, np.arange(idx.size), -1))
-    picked = idx[(np.arange(idx.size) - seg) % 2 == 0]
-    return time[picked]
+    return int(((np.arange(idx.size) - seg) % 2 == 0).sum())
 
 
-def count_in_windows(times, lows, highs):
-    """有多少个 times 落在任一 [low, high] 里。窗互不重叠且已排序。"""
-    if times.size == 0:
+def merges_in_window(time, detector, gain, dead_s):
+    """窗内（逐探头）配到的对数。输入必须已按时间排好。"""
+    total = 0
+    for unit in np.unique(detector):
+        pick = detector == unit
+        total += pairs_one_detector(time[pick], gain[pick], dead_s[pick])
+    return total
+
+
+def cross_detector_pairs(time, detector, tau=CROSS_DETECTOR_TAU):
+    """相邻且**跨探头**、间隔 ≤ τ 的对数。输入必须已按时间排好。"""
+    if time.size < 2:
         return 0
-    i = np.searchsorted(highs, times, "left")
-    ok = i < lows.size
-    hit = np.zeros(times.size, bool)
-    hit[ok] = times[ok] >= lows[i[ok]]
-    return int(hit.sum())
+    return int(
+        ((time[1:] - time[:-1] <= tau) & (detector[1:] != detector[:-1])).sum()
+    )
+
+
+def load_hour(path, override=None):
+    """一小时的准入事例，按时间排好：(时刻, 探头, 增益, 死时间秒)。"""
+    times, units, gains, deads = [], [], [], []
+    with fits.open(path, memmap=True) as hdus:
+        min_channel, ladder_length = override or ladder(hdus)
+        for hdu in hdus:
+            if not hdu.name.startswith("EVENTS"):
+                continue
+            data = hdu.data
+            if data is None or len(data) == 0:
+                continue
+            pi = np.asarray(data["PI"]).astype(np.int16)
+            evt = np.asarray(data["EVT_TYPE"]).astype(np.int8)
+            keep = (evt == NORMAL) & (pi >= min_channel) & (pi < ladder_length)
+            if not keep.any():
+                continue
+            t = np.asarray(data["TIME"], float)[keep]
+            order = np.argsort(t, kind="stable")
+            times.append(t[order])
+            units.append(np.full(order.size, int(hdu.name[-2:]), np.int16))
+            gains.append(np.asarray(data["GAIN_TYPE"])[keep][order].astype(np.int8))
+            deads.append(np.asarray(data["DEAD_TIME"])[keep][order].astype(float) * 1e-6)
+    if not times:
+        return None
+    time = np.concatenate(times)
+    order = np.argsort(time, kind="stable")
+    return (
+        time[order],
+        np.concatenate(units)[order],
+        np.concatenate(gains)[order],
+        np.concatenate(deads)[order],
+    )
+
+
+# 偶然重抽的密度对照：把同一批事例撒在窗长的这些倍数里。1.0 是本体，
+# 0.5 把密度翻倍（问"窗内结构更陡会怎样"），10.0 把密度降十倍（灵敏度检验）。
+SPREADS = (1.0, 0.5, 10.0)
+
+# 按窗长分两档报。**窗比 τ 还短的时候"偶然"这个词就没有意义了**——整窗都在
+# τ 之内，撒哪儿都成对，真与偶然必然相等。这类窗在 C 星池里占一成上下，
+# 混在一起报会把两件不同的事平均成一个没法解释的数。
+SHORT_WINDOW_SECONDS = 1e-6
 
 
 def main():
     signals = json.load(open(sys.argv[1]))
-    limit = int(sys.argv[2]) if len(sys.argv) > 2 else 24
+    draws = int(sys.argv[2]) if len(sys.argv) > 2 else 200
+    limit = int(sys.argv[3]) if len(sys.argv) > 3 else 24
+    override = None
+    if len(sys.argv) > 4:
+        override = tuple(int(x) for x in sys.argv[4].split(","))
+    rng = np.random.default_rng(20260911)
+
     by_hour = {}
     for signal in signals:
         by_hour.setdefault(signal["start"][:13], []).append(signal)
 
-    total_win = 0
-    real = 0
-    null = {s: 0 for s in SHIFTS}
-    total_window_seconds = 0.0
+    # 两档窗各自一套账：`long` 是窗长 > τ 那一档（偶然有意义），
+    # `short` 是窗比 1 µs 还短那一档（整窗都在 τ 之内，真与偶然必然相等）。
+    def tally():
+        return {
+            "windows": 0,
+            "raw_events": 0,
+            "window_seconds": 0.0,
+            "reconciled": 0,
+            "real_merges": 0,
+            "real_cross": 0,
+            "null_merges": {s: 0.0 for s in SPREADS},
+            "null_cross": {s: 0.0 for s in SPREADS},
+        }
+
+    books = {"long": tally(), "short": tally()}
+
     for hour_key in sorted(by_hour)[:limit]:
         group = by_hour[hour_key]
         iso = group[0]["start"]
-        path = newest(f"{ROOT}/{iso[:10].replace('-', '/')}/GRD_EVT/gcg_evt_*_{iso[11:13]}_v*.fits")
+        path = newest(
+            f"{ROOT}/{iso[:10].replace('-', '/')}/GRD_EVT/gcg_evt_*_{iso[11:13]}_v*.fits"
+        )
         if path is None:
+            print(f"  {hour_key} 无文件", flush=True)
             continue
-        lows = np.array([met(s["start"]) + s["delay"] for s in group])
-        highs = lows + np.array([s["bin_size_best"] for s in group])
-        order = np.argsort(lows)
-        lows, highs = lows[order], highs[order]
-        # 重叠窗合并，count_in_windows 的前提是互不重叠
-        merged_lo, merged_hi = [], []
-        for a, b in zip(lows, highs):
-            if merged_hi and a <= merged_hi[-1]:
-                merged_hi[-1] = max(merged_hi[-1], b)
-            else:
-                merged_lo.append(a)
-                merged_hi.append(b)
-        lows = np.array(merged_lo)
-        highs = np.array(merged_hi)
-        total_win += lows.size
-        total_window_seconds += float((highs - lows).sum())
+        hour = load_hour(path, override)
+        if hour is None:
+            print(f"  {hour_key} 无事例", flush=True)
+            continue
+        time, unit, gain, dead = hour
 
-        with fits.open(path, memmap=True) as hdus:
-            min_channel, ladder_length = ladder(hdus)
-            for hdu in hdus:
-                if not hdu.name.startswith("EVENTS"):
-                    continue
-                data = hdu.data
-                if data is None or len(data) == 0:
-                    continue
-                pi = np.asarray(data["PI"]).astype(np.int16)
-                evt = np.asarray(data["EVT_TYPE"]).astype(np.int8)
-                keep = (evt == NORMAL) & (pi >= min_channel) & (pi < ladder_length)
-                if not keep.any():
-                    continue
-                t = np.asarray(data["TIME"], float)[keep]
-                o = np.argsort(t, kind="stable")
-                t = t[o]
-                gain = np.asarray(data["GAIN_TYPE"])[keep][o].astype(np.int8)
-                dead = np.asarray(data["DEAD_TIME"])[keep][o].astype(float) * 1e-6
-                real += count_in_windows(pair_times(t, gain, dead), lows, highs)
-                for shift in SHIFTS:
-                    st = t.copy()
-                    st[gain == 1] += shift
-                    o2 = np.argsort(st, kind="stable")
-                    null[shift] += count_in_windows(
-                        pair_times(st[o2], gain[o2], dead[o2]), lows, highs
+        hour_windows = hour_real = hour_raw = 0
+        hour_null = 0.0
+        for signal in group:
+            t0 = met(signal["start"]) + signal["delay"]
+            t1 = t0 + signal["bin_size_best"]
+            lower = np.searchsorted(time, t0, "left")
+            upper = np.searchsorted(time, t1, "right")
+            if upper - lower < 2:
+                continue
+            w_time = time[lower:upper]
+            w_unit = unit[lower:upper]
+            w_gain = gain[lower:upper]
+            w_dead = dead[lower:upper]
+            n = w_time.size
+
+            book = books["short" if t1 - t0 <= SHORT_WINDOW_SECONDS else "long"]
+            book["windows"] += 1
+            hour_windows += 1
+            book["raw_events"] += n
+            hour_raw += n
+            book["window_seconds"] += t1 - t0
+
+            real = merges_in_window(w_time, w_unit, w_gain, w_dead)
+            book["real_merges"] += real
+            hour_real += real
+            book["real_cross"] += cross_detector_pairs(w_time, w_unit)
+            # 去重后窗内还剩几条，与搜索报的 count 对账
+            if n - real == signal["count"]:
+                book["reconciled"] += 1
+
+            # 偶然：时戳在同一个窗内均匀重抽，标签跟着事例走
+            for spread in SPREADS:
+                width = (t1 - t0) * spread
+                null_here = cross_here = 0
+                for _ in range(draws):
+                    drawn = rng.uniform(t0, t0 + width, n)
+                    order = np.argsort(drawn, kind="stable")
+                    null_here += merges_in_window(
+                        drawn[order], w_unit[order], w_gain[order], w_dead[order]
                     )
-        print(f"  {hour_key}  窗 {lows.size}  真 {real}  偶然 "
-              + "/".join(str(null[s]) for s in SHIFTS), flush=True)
+                    cross_here += cross_detector_pairs(drawn[order], w_unit[order])
+                book["null_merges"][spread] += null_here / draws
+                book["null_cross"][spread] += cross_here / draws
+                if spread == 1.0:
+                    hour_null += null_here / draws
 
-    print(f"\n候选窗 {total_win} 个，合计窗长 {total_window_seconds*1e3:.3f} ms")
-    print(f"窗内真配对 {real}")
-    for shift in SHIFTS:
-        n = null[shift]
-        frac = n / real if real else float("nan")
-        # 二项标准误（偶然数本身是泊松，用 sqrt(n)）
-        err = np.sqrt(n) / real if real else float("nan")
-        print(f"  平移 {shift:5.2f} s：偶然 {n:6d}  →  窗内偶然占比 "
-              f"{frac*100:6.2f}% ± {err*100:.2f}%")
-    mean_null = np.mean([null[s] for s in SHIFTS])
-    print(f"\n**三个平移量的均值：窗内偶然配对占比 {mean_null/real*100:.2f}%**"
-          f"（全小时那个数是 4.16%）")
+        print(
+            f"  {hour_key}  窗 {hour_windows:5d}  原始事例 {hour_raw:6d}  "
+            f"真并 {hour_real:5d}  偶然 {hour_null:8.1f}",
+            flush=True,
+        )
+
+    if not any(book["windows"] for book in books.values()):
+        print("没有可用的窗")
+        return
+
+    if override:
+        print(f"\n⚠ 准入口径被覆盖成 能阈道 {override[0]} / 梯长 {override[1]}（对照用）")
+
+    for name, book in books.items():
+        windows = book["windows"]
+        if not windows:
+            continue
+        head = ("窗长 > 1 µs" if name == "long"
+                else f"窗长 ≤ 1 µs（比 τ = {CROSS_DETECTOR_TAU * 1e9:.0f} ns 只长几倍）")
+        print(f"\n{'=' * 8} {head}：{windows} 个窗 {'=' * 8}")
+        print(f"合计窗长 {book['window_seconds'] * 1e3:.3f} ms，"
+              f"窗内原始事例 {book['raw_events']}（平均每窗 "
+              f"{book['raw_events'] / windows:.2f} 条），"
+              f"密度 {book['raw_events'] / book['window_seconds']:.3e} c/s")
+        print(f"对账：去重后窗内事例数 == 搜索报的 count 的窗 "
+              f"{book['reconciled']}/{windows} = {book['reconciled'] / windows * 100:.2f}%")
+        for title, real, null in (
+            ("双增益去重（同探头、死时间窗内、一高一低）",
+             book["real_merges"], book["null_merges"]),
+            (f"跨探头合并 τ = {CROSS_DETECTOR_TAU * 1e9:.0f} ns",
+             book["real_cross"], book["null_cross"]),
+        ):
+            print(f"  {title}")
+            print(f"    窗内真配到的对   {real}")
+            for spread in SPREADS:
+                label = {1.0: "本体", 0.5: "半窗（密度 ×2）",
+                         10.0: "十窗（密度 ÷10）"}[spread]
+                share = null[spread] / real * 100 if real else float("nan")
+                print(f"    偶然 · {label:16s} {null[spread]:9.1f}   "
+                      f"占真配对 {share:6.2f}%")
+        survivors = max(book["raw_events"] - book["real_merges"], 1)
+        print(f"  双增益去重每窗误并 {book['null_merges'][1.0] / windows:.4f} 条"
+              f"（本体档），窗内计数因此被压低 "
+              f"{book['null_merges'][1.0] / survivors * 100:.2f}%")
 
 
 if __name__ == "__main__":
