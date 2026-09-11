@@ -51,7 +51,7 @@ hd, hb = compare("未关联", np.array([lst_hours(c['start'], float(c['longitude
 print("\n=== 供给全队：HXMT 的 LST 模板（3 h 一格，格心 LST 1.5, 4.5 … 22.5 h）===")
 for nm, rowsrc in (("A 闪电关联 2547（带 WWLLN 夜间偏差，慎用）",
                     np.array([lst_hours(c['start'], float(c['longitude'])) for c in tgf])),
-                   ("B 显著未关联 4677（不经台网，推荐）",
+                   ("B 显著未关联 3467（不经台网，推荐）",
                     np.array([lst_hours(c['start'], float(c['longitude'])) for c in sig]))):
     h = hist(rowsrc)
     print("  %s" % nm)
