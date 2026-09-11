@@ -40,10 +40,29 @@ from gc_dedupe import adjacent  # noqa: E402
 
 ROOT = "/gecamfs/hebs/Archived-DATA/GSDC/LEVEL1/daily"
 EPOCH = (2021, 1, 1)
-MIN_CHANNEL, LADDER, NORMAL = 54, 448, 1
+# 能阈存能量、切的时候折成道号，折算逐文件做——见 `ladder()`。写死道号不行：
+# 归档里有两把能量梯，同一个道号在它们上面差一倍能量。
+MIN_ENERGY_KEV, NORMAL = 40.0, 1
 CPD_HALF_WIDTHS = (1e-5, 1e-4, 1e-3, 1e-2)
 BASELINE_SECONDS = 1.0  # 候选两侧各这么宽
 HOLLOW_SECONDS = 0.005  # 本底窗里挖掉候选两侧各这么宽
+
+def ladder(hdus, min_energy_kev=MIN_ENERGY_KEV):
+    """从这个文件自己的 EBOUNDS 推出 (能阈道, 梯长)，与 Rust 侧同规则。
+
+    **梯长 = 从 ch0 起 `E_MAX[k-1] == E_MIN[k]` 连续到断开为止的长度**（470 行
+    那版在 ch448 断，896 行那版一路到表尾），**能阈道 = 梯上第一个上边界越过
+    `min_energy_kev` 的道**（470 版 ch54、896 版 ch109）。两个都不能写死：
+    GECAM-C 2022-08-03 .. 10-15 那 1,121 小时是细梯，同一个道号差一倍能量。
+    """
+    eb = hdus["EBOUNDS"].data
+    e_min = np.asarray(eb["E_MIN"], float)
+    e_max = np.asarray(eb["E_MAX"], float)
+    broken = np.flatnonzero(np.abs(e_min[1:] - e_max[:-1]) > e_max[:-1] * 1e-4)
+    length = int(broken[0]) + 1 if broken.size else e_min.size
+    above = np.flatnonzero(e_max[:length] > min_energy_kev)
+    return (int(above[0]) if above.size else length), length
+
 
 
 def met(iso):
@@ -79,9 +98,9 @@ def load_hour(iso):
         return None
     times, channels, detectors = [], [], []
     with fits.open(path, memmap=True) as hdus:
-        eb = hdus["EBOUNDS"].data
-        e_max = np.asarray(eb["E_MAX"], float)
-        ch200 = int(np.searchsorted(e_max[:LADDER], 200.0, "left"))
+        min_channel, ladder_length = ladder(hdus)
+        e_max = np.asarray(hdus["EBOUNDS"].data["E_MAX"], float)
+        ch200 = int(np.searchsorted(e_max[:ladder_length], 200.0, "left"))
         gti = hdus["GTI"].data
         gti_start = np.asarray(gti["START"], float)
         gti_stop = np.asarray(gti["STOP"], float)
@@ -93,7 +112,7 @@ def load_hour(iso):
                 continue
             pi = np.asarray(data["PI"]).astype(np.int16)
             evt = np.asarray(data["EVT_TYPE"]).astype(np.int8)
-            keep = (evt == NORMAL) & (pi >= MIN_CHANNEL) & (pi < LADDER)
+            keep = (evt == NORMAL) & (pi >= min_channel) & (pi < ladder_length)
             if not keep.any():
                 continue
             t = np.asarray(data["TIME"], float)[keep]
