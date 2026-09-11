@@ -1,6 +1,7 @@
 use super::Chunk;
 use crate::algorithms::acd::acd_counts;
 use crate::algorithms::detectors::detector_counts;
+use crate::algorithms::live_time;
 use crate::types::{Event, HxmtHe};
 use blink_algorithms::detector_share::{MAX_DETECTOR_FRACTION, max_detector_fraction};
 use blink_algorithms::snapshot_stepping::{SearchConfig, search_new};
@@ -16,13 +17,30 @@ pub fn search(chunk: &Chunk) -> Vec<Signal<Event>> {
         .filter(|event| event.keep())
         .collect::<Vec<_>>();
 
+    // 活时间按事例流推，不再拿整小时当一段。
+    //
+    // 拿整小时当活时间时，本底窗落在 chunk **内部**的数据缺口上，分子少、分母按
+    // 墙钟不变，`mean` 被压低、显著性做高。实测 3571 个池级清洁后的显著候选里
+    // 21 个中招、修正后 6 个跨出 `fa <= 1e-5`；而 899 个闪电关联候选一个不沾
+    // ——缺口跟仪器状态走（高纬、进出 SAA），闪电关联的真 TGF 在低纬，
+    // 两个人群天生不在一处，所以这条修正不需要在真值与效率之间权衡。
+    //
+    // **伸出 chunk 边界那一类不在此列**：`live_length` 本来就把窗夹到 `start`，
+    // 早就算对了。判别三分类见 OPEN-QUESTIONS 第 34 条。
+    //
+    // 用的是过滤后的 `events`，与搜索的分子同一份，口径自洽。
+    let gti = live_time::gti_from_events(
+        &events,
+        [chunk.span[0], chunk.span[1]],
+        live_time::DEFAULT_FALSE_GAP_BUDGET,
+    );
+
     let results = search_new(
         &events,
         1,
         chunk.span[0],
         chunk.span[1],
-        // 整小时当活时间：与按 chunk 边界夹取的原行为逐位相同。
-        &[[chunk.span[0], chunk.span[1]]],
+        &gti,
         SearchConfig {
             min_duration: Time::new::<uom::si::time::microsecond>(0.0),
             max_duration: Time::new::<uom::si::time::millisecond>(1.0),
