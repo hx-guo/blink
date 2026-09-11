@@ -41,19 +41,32 @@ const DEAD_GAP_EXPECTED_COUNTS: f64 = 9.2;
 /// （03B 277/277），失去的只有辐射带。取本底窗速率与过境速率中的大者比较。
 const RATE_CEILING: f64 = 5000.0;
 
-/// 最显著一格里落在同一个时间戳上的事例占比上限。
+/// 最显著一格里落在 **≥3 重同戳簇** 上的事例占比上限（f₃）。
 ///
-/// 全量首跑速率门以下的 348 个显著候选（fa ≤ 1e-5）里，261 个有一半以上的计数
-/// 挤在同一个时间戳上：四路各一个、时间戳完全相同（跨探测器 dt = 0），最显著
-/// 一格只有这四个加零星本底（计数中位 4），谱比本底硬得多（PI 中位比 3.8 对
-/// 另一群的 1.7），经度均匀分布。这是穿过整星的带电粒子——四块 GAGG 同时响应、
-/// 各留一个大沉积——不是 TGF。另一群 87 个的计数在几百微秒里铺开（时长中位
-/// 564 µs），最小间隔在 4.77 µs 的时间戳分辨率量级，经度集中在 120°E–180°
-/// （海洋大陆雷暴区占 43%）。两群在占比 0.45–0.50 之间一个候选都没有。门槛与
-/// GBM 同取 0.35：一个时间戳上超过三分之一的计数就当粒子否决。四路合成一路
-/// 搜索没有组间符合可用，这道门就是天格挡带电粒子的唯一手段。见
-/// `OPEN-QUESTIONS.md` 第 10 条。
-const MAX_SIMULTANEOUS_FRACTION: f64 = 0.35;
+/// 挡的是穿过整星的带电粒子：四块 GAGG 同时响应、各留一个大沉积，时间戳完全相同
+/// （同一探头从不同戳，1.11e8 个探头内相邻对里严格为 0，所以同戳必然是跨探头的）。
+/// 四路合成一路搜索没有组间符合可用，这道门是天格挡带电粒子的唯一手段。
+///
+/// **为什么数三重而不是数"最长的一串"。** 原先的判据是同戳占比（f₂ 口径的最长串）
+/// 阈 0.35。它有两个毛病：
+///
+/// 1. **对重复发生的粒子失明。** 实测有一批候选是几百微秒里重复 2–4 次三四路同戳，
+///    每一串除以总计数都不到 0.35，整批漏过去了——v10 的 38 个 03B 显著候选里 12 个
+///    带这种形态，而它们的旧判据值全部落在 0.273–0.333，紧贴在阈值下面。
+/// 2. **偶然基底太高。** 窗内 n 个事例散在时长 T 上、量化步 q = 2⁻²² s 时，二重同戳
+///    的偶然期望是 (n−1)·q/T，实测中位 0.0113、最大 0.069——阈到噪声只有 5–31 倍。
+///    三重的偶然期望是它的平方量级（`Σ_{k≥3} k·m·C(n,k)p^k(1−p)^{n−k} / n`，
+///    `m = T/q`、`p = 1/m`），实测中位 5.6e-5、最大 2.1e-3，**实测非零者的
+///    实测/偶然最小 1.1e4**。同一批数据上，判别量从 5–31 倍的分离变成四个数量级。
+///
+/// **阈取 0.5**：实测 f₃ 在 0.333 与 0.600 之间有一个干净的空隙，0.35–0.55 之间取
+/// 任何值否决的候选完全相同（8 个）。取上沿是为了多一层保护——真暴窗里偶然混进
+/// 一个粒子三重就是 3/n，n = 8 时 0.375 会被 0.35 误杀、0.5 不会。7 个有闪电认证的
+/// 真 TGF 的 f₃ **全部为 0**，一个例外都没有。见 `OPEN-QUESTIONS.md` 未决项 14。
+const MAX_TRIPLE_FRACTION: f64 = 0.5;
+
+/// 一簇同戳事例要几个才算粒子签名。二重不算：偶然期望 1% 量级，压不住噪声。
+const TRIPLE: usize = 3;
 
 /// 本底窗 `[from, to]`（已夹到候选所在的 GTI 段内）里是否有读出空洞。
 ///
@@ -80,12 +93,15 @@ fn has_dead_gap<S: Satellite>(events: &[Event<S>], from: f64, to: f64, pass_rate
     rate * longest > DEAD_GAP_EXPECTED_COUNTS
 }
 
-/// 最显著一格 `[start, stop]` 里同一时间戳上最多有几个事例，占该格事例数的比例。
+/// 最显著一格 `[start, stop]` 里落在 ≥3 重同戳簇上的事例数，占该格事例数的比例（f₃）。
 ///
-/// `events` 已按时间排好，时间戳相同的事例必然相邻，扫一遍取最长的一段。两端
-/// 都是事例本身的时刻（`Candidate` 的 start 与 delay、bin_size_best 都来自事例），
-/// 闭区间比较，边界上那一簇不会漏。
-fn simultaneous_fraction<S: Satellite>(
+/// 数的是**所有**这样的簇的计数之和，不是最长的那一串——重复出现的多重同戳正是
+/// 现行判据漏掉的那种粒子形态（见 `MAX_TRIPLE_FRACTION`）。
+///
+/// `events` 已按时间排好，时间戳相同的事例必然相邻，扫一遍分段即可。两端都是事例
+/// 本身的时刻（`Candidate` 的 start 与 delay、bin_size_best 都来自事例），闭区间
+/// 比较，边界上那一簇不会漏。
+fn triple_fraction<S: Satellite>(
     events: &[Event<S>],
     start: MissionElapsedTime<Grid<S>>,
     stop: MissionElapsedTime<Grid<S>>,
@@ -96,16 +112,19 @@ fn simultaneous_fraction<S: Satellite>(
     if window.is_empty() {
         return 0.0;
     }
-    let (mut longest, mut run) = (1usize, 1usize);
-    for pair in window.windows(2) {
-        run = if pair[1].time() == pair[0].time() {
-            run + 1
+    let (mut in_clusters, mut run) = (0usize, 1usize);
+    for i in 1..=window.len() {
+        let same = i < window.len() && window[i].time() == window[i - 1].time();
+        if same {
+            run += 1;
         } else {
-            1
-        };
-        longest = longest.max(run);
+            if run >= TRIPLE {
+                in_clusters += run;
+            }
+            run = 1;
+        }
     }
-    longest as f64 / window.len() as f64
+    in_clusters as f64 / window.len() as f64
 }
 
 pub(super) fn search<S: Satellite>(chunk: &Chunk<S>) -> Vec<Signal<Event<S>>> {
@@ -206,9 +225,17 @@ pub(super) fn search<S: Satellite>(chunk: &Chunk<S>) -> Vec<Signal<Event<S>>> {
             }
             // 带电粒子否决看最显著的那一格：由 start 偏移 delay 得到，两者都是
             // 事例的时刻，差与和在 f64 下精确。
+            //
+            // 共帧读出的星整个跳过这道门：那里任一路击中就开一个 28.6 µs 的帧、
+            // 帧内所有事例共用触发那一击的时戳，**同戳是读出结构的必然产物不是
+            // 物理**。实测把 03B 的真暴按共帧读出重放，这道门会否掉一半左右的真
+            // 暴发（最亮的那个有闪电认证的 TGF 有 76% 的试验被它砍掉），而穿星
+            // 粒子在共帧下只留 4 个计数、根本够不着候选门，轮不到这道门。
             let best_start = candidate.start + candidate.delay;
             let best_stop = best_start + candidate.bin_size_best;
-            if simultaneous_fraction(&events, best_start, best_stop) > MAX_SIMULTANEOUS_FRACTION {
+            if !S::SHARED_FRAME
+                && triple_fraction(&events, best_start, best_stop) > MAX_TRIPLE_FRACTION
+            {
                 n_simultaneous += 1;
                 return None;
             }
@@ -353,7 +380,7 @@ mod tests {
 
     fn fraction(times: &[f64]) -> f64 {
         let events = at(times);
-        simultaneous_fraction(&events, events[0].time(), events[events.len() - 1].time())
+        triple_fraction(&events, events[0].time(), events[events.len() - 1].time())
     }
 
     #[test]
@@ -362,15 +389,46 @@ mod tests {
         let times = [
             100.0, 100.0, 100.0, 100.0, 100.0002, 100.0004, 100.0006, 100.0008,
         ];
-        assert!(fraction(&times) > MAX_SIMULTANEOUS_FRACTION);
+        assert!((fraction(&times) - 0.5).abs() < 1e-12);
+    }
+
+    #[test]
+    fn particles_crossing_twice_are_caught_although_no_single_run_is_long() {
+        // 旧判据漏掉的那种形态：几百微秒里重复两次三路同戳，最长一串只有 3/10 = 0.3，
+        // 但落在三重簇里的计数是 6/10 = 0.6
+        let times = [
+            100.0, 100.0, 100.0, 100.0001, 100.0003, 100.0004, 100.0004, 100.0004, 100.0006,
+            100.0007,
+        ];
+        assert!((fraction(&times) - 0.6).abs() < 1e-12);
+        assert!(fraction(&times) > MAX_TRIPLE_FRACTION);
+    }
+
+    #[test]
+    fn a_burst_with_one_stray_particle_survives() {
+        // 真暴窗里偶然混进一个粒子三重：3/9 = 0.333，阈 0.5 留得住（0.35 会误杀）
+        let times = [
+            100.0, 100.0, 100.0, 100.0002, 100.0004, 100.0006, 100.0008, 100.0010, 100.0012,
+        ];
+        assert!((fraction(&times) - 1.0 / 3.0).abs() < 1e-12);
+        assert!(fraction(&times) < MAX_TRIPLE_FRACTION);
+    }
+
+    #[test]
+    fn pairs_on_one_timestamp_do_not_count() {
+        // 二重同戳的偶然期望是 1% 量级，压不住噪声，所以只数三重及以上：全是二重 → 0
+        let times = [
+            100.0, 100.0, 100.0002, 100.0002, 100.0004, 100.0004, 100.0006, 100.0006,
+        ];
+        assert_eq!(fraction(&times), 0.0);
     }
 
     #[test]
     fn a_burst_spread_over_the_timestamp_grid_is_kept() {
-        // 20 个事例铺在 4.77 µs 的时间戳格上，每格最多两个：2/20 = 0.1
+        // 20 个事例铺在 4.77 µs 的时间戳格上，每格最多两个：一个三重都没有
         let tick = 4.768e-6;
         let times: Vec<f64> = (0..20).map(|i| 100.0 + (i / 2) as f64 * tick).collect();
-        assert!(fraction(&times) < MAX_SIMULTANEOUS_FRACTION);
+        assert_eq!(fraction(&times), 0.0);
     }
 
     #[test]
@@ -380,6 +438,15 @@ mod tests {
             100.0, 100.0001, 100.0002, 100.0003, 100.0003, 100.0003, 100.0003,
         ];
         assert!((fraction(&times) - 4.0 / 7.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn shared_frame_satellites_skip_the_particle_veto() {
+        // 共帧星上同戳是读出结构的必然产物，不是物理——这道门对它们整个跳过
+        assert!(!Sat03B::SHARED_FRAME);
+        assert!(crate::types::Sat02::SHARED_FRAME);
+        assert!(crate::types::Sat04::SHARED_FRAME);
+        assert!(crate::types::Sat07::SHARED_FRAME);
     }
 
     #[test]
