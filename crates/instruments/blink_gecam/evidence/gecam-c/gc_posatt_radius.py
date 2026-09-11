@@ -15,7 +15,7 @@ from astropy.io import fits
 
 ROOT = "/gecamfs/hebs/Archived-DATA/GSDC/LEVEL1/daily"
 A = 6378137.0
-R_MIN, R_MAX = A + 300e3, A + 900e3
+R_MIN, R_MAX = A + 100e3, A + 900e3
 
 
 def main():
