@@ -16,8 +16,11 @@ TOL = 10e-3
 
 
 def met(iso):
+    """ISO → unix 秒。这里的配对容差是 10 ms，1 µs 的截断影响不到结果，
+    但写法与其他脚本保持一致：整秒走 strptime，小数秒单独加，不截。"""
     b = iso.rstrip("Z"); h, _, f = b.partition(".")
-    return datetime.strptime(h + "." + (f + "000000")[:6], "%Y-%m-%dT%H:%M:%S.%f").replace(tzinfo=timezone.utc).timestamp()
+    stamp = datetime.strptime(h, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+    return stamp.timestamp() + (float("0." + f) if f else 0.0)
 
 
 def load(path, until="2025-01-01"):

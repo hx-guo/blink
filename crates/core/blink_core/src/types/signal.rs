@@ -25,6 +25,30 @@ pub struct AcdCounts {
     pub n_acd_bg: u32,
 }
 
+/// 候选窗内逐路探测器的计数，下标即探头序（GECAM 是 `EVENTS01..NN` 的顺序）。
+///
+/// 和 `AcdCounts` 一样，这是候选生成时从事例流现场统计的量，事后无法从候选表
+/// 复原——不当场存下来，日后要做方向分析就得重跑全量（GECAM-C 5.8 TB、
+/// GECAM-B 110 TB）。
+///
+/// 用途是方向：探头朝向各不相同，逐路计数的相对高低就编码了入射方向。GECAM
+/// 的 25 路 GRD 有 401 个方向的蒙卡响应（CALDB `mc_rsp`），拿这个向量去拟合
+/// 就能定方向；判断"从天顶来还是从地球来"更是不需要拟合，看朝地那几路有没有
+/// 亮就够——而这一条正是 TGF 与 GRB、TGF 与 TEB 的分界。探头少的仪器（天格 4
+/// 路、GRM 3 路）填了也无妨，只是能问的问题少些。
+///
+/// 只存计数不存比例：保泊松误差，判据日后可复议而不必重跑。
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct DetectorCounts {
+    /// 候选窗 `[start, stop]` 内逐路通过准入的事例数
+    pub window: Vec<u32>,
+    /// 邻域基线窗内逐路的计数，同样的下标。没有它就没法把"这一路亮"
+    /// 和"这一路本来就快"区分开。
+    pub baseline: Vec<u32>,
+    /// 基线窗的总长（秒）。窗长不同，两组计数不能直接比。
+    pub baseline_seconds: f64,
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct Signal<E: Event> {
     pub start: MissionElapsedTime<E::Instrument>,
@@ -44,6 +68,9 @@ pub struct Signal<E: Event> {
     pub position: Position,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub acd: Option<AcdCounts>,
+    /// 逐路探测器计数，见 `DetectorCounts`。探头多的仪器填，其余留 `None`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detectors: Option<DetectorCounts>,
 }
 
 impl<E: Event> Signal<E> {
@@ -63,6 +90,7 @@ impl<E: Event> Signal<E> {
             position: self.position.clone(),
             instrument: <E::Instrument as Instrument>::name().to_string(),
             acd: self.acd.clone(),
+            detectors: self.detectors.clone(),
         }
     }
 }
@@ -87,6 +115,9 @@ pub struct UnifiedSignal {
     /// `default` 兼容旧 signals.json（无此字段 → None），None 不序列化。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub acd: Option<AcdCounts>,
+    /// 见 `DetectorCounts`；`default` 兼容旧文件。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detectors: Option<DetectorCounts>,
 }
 
 impl UnifiedSignal {

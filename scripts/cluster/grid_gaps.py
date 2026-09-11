@@ -4,8 +4,14 @@ import glob, os, json, sys, numpy as np, datetime as dt
 G = "/gecamfs/Exchange/GSDC/missions/GRID"; R = "/scratchfs2/gecam/guohx/gridrun/data"
 REF = dt.datetime(2018, 1, 1, tzinfo=dt.timezone.utc)
 def met(iso):
-    b = iso.rstrip("Z"); h, f = b.split("."); b = h + "." + (f + "000000")[:6]
-    return (dt.datetime.strptime(b, "%Y-%m-%dT%H:%M:%S.%f").replace(tzinfo=dt.timezone.utc) - REF).total_seconds()
+    """ISO 时刻 → MET 秒。小数秒不能截到微秒：搜索产物的时刻带纳秒，候选窗的
+    两端都是事例本身的时刻，截断把窗口整体左移不到 1 µs 就足以把落在窗末端的
+    那个事例（连同与它同戳的几个）挤出窗外。整秒交给 datetime，小数部分按
+    浮点单独加。"""
+    body = iso.rstrip("Z")
+    head, _, frac = body.partition(".")
+    stamp = dt.datetime.strptime(head, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=dt.timezone.utc)
+    return (stamp - REF).total_seconds() + (float("0." + frac) if frac else 0.0)
 GAP = 0.003
 for sat, day, tag in (("GRID-03B", "2023-08-12", "20230812"), ("GRID-02", "2020-12-08", "20201208"), ("GRID-04", "2022-03-11", "20220311")):
     y, m, d0 = day.split("-"); vdir = sorted(os.listdir(f"{G}/{sat}/fits7/{y}/{m}/{d0}"))[-1]

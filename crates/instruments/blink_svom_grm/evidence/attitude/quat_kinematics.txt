@@ -1,0 +1,104 @@
+===== 2025/09/19 =====
+样本 86507，连续 1 s 采样对 78440，其中机动样本（|w| > 1e-03 rad/s）645
+机动样本 |w|：中位 0.7244 deg/s，最大 0.9921 deg/s
+
+假设                                                               相对残差中位         相关
+Q0=标量 | R:body→inertial | ω@body | w 在卫星系                       0.01888  +0.996198
+Q0=标量 | R:inertial→body | ω@inertial | w 在载荷系                   0.54072  +0.868277
+Q0=标量 | R:inertial→body | ω@body | w 在载荷系                       0.81880  +0.663522
+Q3=标量 | R:body→inertial | ω@body | w 在卫星系                       0.81880  +0.663522
+Q3=标量 | R:inertial→body | ω@body | w 在载荷系                       1.09966  +0.386354
+Q3=标量 | R:inertial→body | ω@inertial | w 在载荷系                   1.14845  +0.391083
+Q0=标量 | R:body→inertial | ω@inertial | w 在卫星系                   1.14845  +0.391083
+Q3=标量 | R:inertial→body | ω@body | w 在卫星系                       1.37621  +0.055321
+Q3=标量 | R:body→inertial | ω@inertial | w 在卫星系                   1.45789  -0.055321
+Q3=标量 | R:body→inertial | ω@body | w 在载荷系                       1.64275  -0.391083
+Q0=标量 | R:inertial→body | ω@body | w 在卫星系                       1.64275  -0.391083
+Q3=标量 | R:body→inertial | ω@inertial | w 在载荷系                   1.66527  -0.386354
+Q3=标量 | R:inertial→body | ω@inertial | w 在卫星系                   1.82499  -0.663522
+Q0=标量 | R:body→inertial | ω@inertial | w 在载荷系                   1.82499  -0.663522
+Q0=标量 | R:body→inertial | ω@body | w 在载荷系                       1.94012  -0.868277
+Q0=标量 | R:inertial→body | ω@inertial | w 在卫星系                   2.01197  -0.996198
+
+判定：Q0=标量 | R:body→inertial | ω@body | w 在卫星系
+      相对残差中位 0.01888，逐分量相关 +0.996198
+      次优假设的相对残差 0.54072（差 29 倍）
+
+===== 2026/02/26 =====
+样本 86489，连续 1 s 采样对 79443，其中机动样本（|w| > 1e-03 rad/s）575
+机动样本 |w|：中位 0.3115 deg/s，最大 1.1823 deg/s
+
+假设                                                               相对残差中位         相关
+Q0=标量 | R:body→inertial | ω@body | w 在卫星系                       0.02308  +0.999096
+Q0=标量 | R:inertial→body | ω@inertial | w 在载荷系                   0.25149  +0.820670
+Q0=标量 | R:inertial→body | ω@body | w 在卫星系                       0.50464  +0.866934
+Q3=标量 | R:body→inertial | ω@body | w 在载荷系                       0.50464  +0.866934
+Q3=标量 | R:body→inertial | ω@inertial | w 在载荷系                   1.04920  +0.619478
+Q3=标量 | R:inertial→body | ω@inertial | w 在卫星系                   1.07795  +0.497534
+Q0=标量 | R:body→inertial | ω@inertial | w 在载荷系                   1.07795  +0.497534
+Q3=标量 | R:inertial→body | ω@body | w 在卫星系                       1.30292  +0.136349
+Q3=标量 | R:body→inertial | ω@inertial | w 在卫星系                   1.50794  -0.136349
+Q0=标量 | R:inertial→body | ω@body | w 在载荷系                       1.69733  -0.497534
+Q3=标量 | R:body→inertial | ω@body | w 在卫星系                       1.69733  -0.497534
+Q3=标量 | R:inertial→body | ω@body | w 在载荷系                       1.71117  -0.619478
+Q0=标量 | R:body→inertial | ω@inertial | w 在卫星系                   1.95002  -0.866934
+Q3=标量 | R:inertial→body | ω@inertial | w 在载荷系                   1.95002  -0.866934
+Q0=标量 | R:body→inertial | ω@body | w 在载荷系                       1.96561  -0.820670
+Q0=标量 | R:inertial→body | ω@inertial | w 在卫星系                   2.00590  -0.999096
+
+判定：Q0=标量 | R:body→inertial | ω@body | w 在卫星系
+      相对残差中位 0.02308，逐分量相关 +0.999096
+      次优假设的相对残差 0.25149（差 11 倍）
+
+===== 2024/12/05 =====
+样本 86489，连续 1 s 采样对 76312，其中机动样本（|w| > 1e-03 rad/s）780
+机动样本 |w|：中位 0.6666 deg/s，最大 1.1774 deg/s
+
+假设                                                               相对残差中位         相关
+Q0=标量 | R:body→inertial | ω@body | w 在卫星系                       0.01708  +0.999393
+Q0=标量 | R:inertial→body | ω@inertial | w 在载荷系                   0.45646  +0.836708
+Q3=标量 | R:body→inertial | ω@body | w 在载荷系                       1.13371  +0.450700
+Q0=标量 | R:inertial→body | ω@body | w 在卫星系                       1.13371  +0.450700
+Q0=标量 | R:body→inertial | ω@inertial | w 在载荷系                   1.23867  +0.219331
+Q3=标量 | R:inertial→body | ω@inertial | w 在卫星系                   1.23867  +0.219331
+Q3=标量 | R:inertial→body | ω@body | w 在载荷系                       1.33335  +0.419741
+Q3=标量 | R:inertial→body | ω@body | w 在卫星系                       1.38470  -0.049757
+Q3=标量 | R:body→inertial | ω@inertial | w 在卫星系                   1.44312  +0.049757
+Q3=标量 | R:body→inertial | ω@inertial | w 在载荷系                   1.49478  -0.419741
+Q0=标量 | R:inertial→body | ω@body | w 在载荷系                       1.57187  -0.219331
+Q3=标量 | R:body→inertial | ω@body | w 在卫星系                       1.57187  -0.219331
+Q3=标量 | R:inertial→body | ω@inertial | w 在载荷系                   1.65475  -0.450700
+Q0=标量 | R:body→inertial | ω@inertial | w 在卫星系                   1.65475  -0.450700
+Q0=标量 | R:body→inertial | ω@body | w 在载荷系                       1.91057  -0.836708
+Q0=标量 | R:inertial→body | ω@inertial | w 在卫星系                   2.00011  -0.999393
+
+判定：Q0=标量 | R:body→inertial | ω@body | w 在卫星系
+      相对残差中位 0.01708，逐分量相关 +0.999393
+      次优假设的相对残差 0.45646（差 27 倍）
+
+===== 2025/01/15 =====
+样本 86507，连续 1 s 采样对 75748，其中机动样本（|w| > 1e-03 rad/s）1072
+机动样本 |w|：中位 0.8222 deg/s，最大 1.2734 deg/s
+
+假设                                                               相对残差中位         相关
+Q0=标量 | R:body→inertial | ω@body | w 在卫星系                       0.02247  +0.998195
+Q0=标量 | R:inertial→body | ω@inertial | w 在载荷系                   0.43354  +0.940402
+Q3=标量 | R:inertial→body | ω@body | w 在载荷系                       1.08384  +0.231917
+Q0=标量 | R:inertial→body | ω@body | w 在卫星系                       1.11322  +0.446589
+Q3=标量 | R:body→inertial | ω@body | w 在载荷系                       1.11322  +0.446589
+Q0=标量 | R:body→inertial | ω@inertial | w 在载荷系                   1.12141  +0.440846
+Q3=标量 | R:inertial→body | ω@inertial | w 在卫星系                   1.12141  +0.440846
+Q3=标量 | R:inertial→body | ω@body | w 在卫星系                       1.41841  +0.007471
+Q3=标量 | R:body→inertial | ω@inertial | w 在卫星系                   1.42614  -0.007471
+Q3=标量 | R:body→inertial | ω@inertial | w 在载荷系                   1.66212  -0.231917
+Q0=标量 | R:inertial→body | ω@body | w 在载荷系                       1.66715  -0.440846
+Q3=标量 | R:body→inertial | ω@body | w 在卫星系                       1.66715  -0.440846
+Q3=标量 | R:inertial→body | ω@inertial | w 在载荷系                   1.67536  -0.446589
+Q0=标量 | R:body→inertial | ω@inertial | w 在卫星系                   1.67536  -0.446589
+Q0=标量 | R:body→inertial | ω@body | w 在载荷系                       1.96714  -0.940402
+Q0=标量 | R:inertial→body | ω@inertial | w 在卫星系                   2.01355  -0.998195
+
+判定：Q0=标量 | R:body→inertial | ω@body | w 在卫星系
+      相对残差中位 0.02247，逐分量相关 +0.998195
+      次优假设的相对残差 0.43354（差 19 倍）
+

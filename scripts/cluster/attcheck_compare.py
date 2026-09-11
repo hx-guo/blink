@@ -1,8 +1,14 @@
 """针对性重跑 vs 权威目录：逐天按起始时间（±1 ms）配对，找只在新结果里出现且没有 attitude 字段的候选。"""
 import json, glob, os, sys
 from datetime import datetime, timezone
+# 小数秒不能交给 datetime：它只到微秒，把 9 位纳秒串截到 6 位会把时刻前移
+# 最多 1 µs。HXMT 的候选窗端点就是事例时刻本身（实测端点只有 0.96% 恰好落在
+# 整微秒上，平均前移 775 ns），截断会直接丢掉边界那个事例。整数秒交给
+# strptime，小数部分单独按 float 加回来。
 def t(iso):
-    b = iso.rstrip("Z"); h, f = b.split("."); return datetime.strptime(h + "." + (f + "000000")[:6], "%Y-%m-%dT%H:%M:%S.%f").replace(tzinfo=timezone.utc).timestamp()
+    b = iso.rstrip("Z"); h, _, f = b.partition(".")
+    stamp = datetime.strptime(h, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+    return stamp.timestamp() + (float("0." + f) if f else 0.0)
 for tag, new_root, old_root, sub in (("HXMT", "/scratchfs2/gecam/guohx/v6run/attcheck/data", "/scratchfs2/gecam/guohx/v6run/data", "Insight-HXMT_HE"), ("SVOM", "/scratchfs2/gecam/guohx/svomrun5/attcheck/data", "/scratchfs2/gecam/guohx/svomrun5/data", "SVOM_GRM")):
     days = [l.strip() for l in open(os.path.dirname(new_root) + "/days.txt") if l.strip()]
     done = 0; n_new = n_old = 0; only_new = []; only_old = []; no_att = 0; without = 0; noeph_new = 0; single = 0

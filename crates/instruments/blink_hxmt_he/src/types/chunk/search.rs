@@ -1,5 +1,6 @@
 use super::Chunk;
 use crate::algorithms::acd::acd_counts;
+use crate::algorithms::detectors::detector_counts;
 use crate::types::{Event, HxmtHe};
 use blink_algorithms::detector_share::{MAX_DETECTOR_FRACTION, max_detector_fraction};
 use blink_algorithms::snapshot_stepping::{SearchConfig, search_new};
@@ -95,6 +96,12 @@ pub fn search(chunk: &Chunk) -> Vec<Signal<Event>> {
                 position: position.state,
                 // ACD 符合计数必须在此刻统计：候选表落盘后事例流就不在手边了
                 acd: Some(acd_counts(
+                    &events,
+                    candidate.start.met(),
+                    candidate.stop.met(),
+                )),
+                // 逐路计数与 ACD 一样只有此刻取得到，见 algorithms::detectors
+                detectors: Some(detector_counts(
                     &events,
                     candidate.start.met(),
                     candidate.stop.met(),

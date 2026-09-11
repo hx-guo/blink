@@ -28,13 +28,15 @@ NCHAN = 259
 
 
 def met(iso):
+    """ISO → (MET, datetime)。小数秒不能截：serde 写的是纳秒精度，而候选的
+    start/stop 恰好就是窗内首末两个事例的时刻，截到微秒会把窗口整体左移最多
+    1 µs，末端点落到最后一个事例之前——实测 901 个显著候选里 49.9% 因此少算
+    一个事例。整秒走 strptime，小数秒单独加；返回的 datetime 只用来定位小时
+    文件，取到整秒就够。"""
     body = iso.rstrip("Z")
-    if "." in body:
-        head, frac = body.split("."); body = head + "." + (frac + "000000")[:6]
-    else:
-        body += ".000000"
-    t = datetime.strptime(body, "%Y-%m-%dT%H:%M:%S.%f").replace(tzinfo=timezone.utc)
-    return (t - REF).total_seconds(), t
+    head, _, frac = body.partition(".")
+    t = datetime.strptime(head, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+    return (t - REF).total_seconds() + (float("0." + frac) if frac else 0.0), t
 
 
 def load_hour(day, hh):

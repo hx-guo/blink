@@ -22,7 +22,8 @@ pub(super) fn from_epoch(epoch: &DateTime<Utc>) -> Result<Chunk, Error> {
             let Some(path) = find_tte(epoch, name) else {
                 continue;
             };
-            let file = TteFile::from_fits_file(path.to_str().unwrap(), detector)?;
+            let unit = Detector::unit_index(name).expect("归档里的探头代号都在 UNIT_NAMES 里");
+            let file = TteFile::from_fits_file(path.to_str().unwrap(), detector, unit)?;
             if file.is_empty() {
                 continue;
             }

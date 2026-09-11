@@ -4,6 +4,11 @@
 候选。输出每个候选在 14 个探头上的计数，据此可以同时评估几种分组方案：
   3 组  = 12 个 NaI 合一组 + b0 + b1（GBM 团队的做法）
   14 组 = 每个探头一组
+
+**本脚本已被 `gbm_stats2.py` 取代**：这里数的窗是合并后的包络 `[start, stop]`，
+而 `count` 来自最显著的那一格，两者本来就对不上（`Candidate::merge` 会把
+`stop` 拉长）。要与 `count` 对账得用 `[start+delay, start+delay+bin_size_best]`，
+见 gbm_stats2.py。留着只为复现旧结果。
 """
 from astropy.io import fits
 import numpy as np, glob, json, csv
@@ -16,15 +21,13 @@ D = "/hxmtfs/data/Fermi_GBM/2019/01/01/current"
 DETS = ["n0","n1","n2","n3","n4","n5","n6","n7","n8","n9","na","nb","b0","b1"]
 
 def met(iso):
-    # serde 会截掉小数末尾的零，所以秒的小数位数不固定，不能按定长切片。
+    # serde 会截掉小数末尾的零，所以秒的小数位数不固定，不能按定长切片；
+    # 更要紧的是**不能截到微秒**——候选窗只有几微秒宽，截断会把边界上的整簇
+    # 事例挡在窗外（实测有候选因此从 10 个数成 1 个）。按小数点切、整段转浮点。
     body = iso.rstrip("Z")
-    if "." in body:
-        head, frac = body.split(".")
-        body = head + "." + (frac + "000000")[:6]
-    else:
-        body += ".000000"
-    t = datetime.strptime(body, "%Y-%m-%dT%H:%M:%S.%f").replace(tzinfo=timezone.utc)
-    return (t - REF).total_seconds() + LEAPS, t
+    head, _, frac = body.partition(".")
+    t = datetime.strptime(head, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+    return (t - REF).total_seconds() + (float("0." + frac) if frac else 0.0) + LEAPS, t
 
 s = json.load(open("/scratchfs2/gecam/guohx/gbmrun/data/Fermi_GBM/2019/01/20190101_signals.json"))
 by_hour = defaultdict(list)

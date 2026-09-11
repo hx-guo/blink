@@ -12,6 +12,9 @@ use crate::types::Detector;
 /// 一个探头一小时的 TTE。文件是 gzip 压缩的，cfitsio 透明解压。
 pub struct TteFile {
     pub detector: Detector,
+    /// 本文件是 14 路里的哪一路，下标按 `Detector::UNIT_NAMES`。
+    /// `detector` 只到类型（12 个 NaI 合成一个 `Nai`），逐路计数要的是这个。
+    pub unit: u8,
     time: Vec<f64>,
     pha: Vec<i16>,
     gti_start: Vec<f64>,
@@ -19,7 +22,11 @@ pub struct TteFile {
 }
 
 impl TteFile {
-    pub fn from_fits_file(path: &str, detector: Detector) -> Result<Self, fitsio::errors::Error> {
+    pub fn from_fits_file(
+        path: &str,
+        detector: Detector,
+        unit: u8,
+    ) -> Result<Self, fitsio::errors::Error> {
         let mut fptr = fitsio::FitsFile::open(path)?;
 
         let events = fptr.hdu("EVENTS")?;
@@ -32,6 +39,7 @@ impl TteFile {
 
         Ok(Self {
             detector,
+            unit,
             time,
             pha,
             gti_start,
@@ -75,6 +83,9 @@ impl TteFile {
     /// 时间回跳处数。事例流有序是 k 路归并与搜索窗长判据的前提；
     /// SVOM/GRM 上出现过整段数据写两遍导致的回跳，这里一并记账。
     pub fn time_reversals(&self) -> usize {
-        self.time.windows(2).filter(|pair| pair[1] < pair[0]).count()
+        self.time
+            .windows(2)
+            .filter(|pair| pair[1] < pair[0])
+            .count()
     }
 }

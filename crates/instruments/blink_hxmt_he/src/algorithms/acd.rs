@@ -10,10 +10,17 @@ use crate::types::Event;
 use blink_core::traits::Event as _;
 use blink_core::types::AcdCounts;
 
-/// 基线窗与搜索邻域一致：候选两侧各 1 s，紧贴候选的 10 ms hollow 挖掉，
-/// 避免瞬变自身拖尾污染基线（对应 SearchConfig 的 neighbor / hollow）。
-const NEIGHBOR_S: f64 = 1.0;
-const HOLLOW_S: f64 = 0.01;
+/// 基线窗：候选两侧各 1 s，紧贴候选的 10 ms hollow 挖掉，避免瞬变自身拖尾
+/// 污染基线。
+///
+/// **与搜索的本底窗不是同一个宽度，别拿 `n_bg` 直接当搜索的 `mean` 用。**
+/// `SearchConfig` 的 `neighbor = 1 s` / `hollow = 10 ms` 是**总宽**，
+/// `search_new` 里两侧各取 `neighbor / 2`、`hollow / 2`，即 ±0.5 s 与 ±5 ms；
+/// 这里两侧各取 1 s 与 10 ms，正好是搜索的两倍。本底率稳定时
+/// `n_bg ≈ 2 × pure_mean_number`，`mean ∝ n_bg × bin_size_best`，但机箱级停机
+/// 这类窗内不均匀的情形下两者不成比例。
+pub(crate) const NEIGHBOR_S: f64 = 1.0;
+pub(crate) const HOLLOW_S: f64 = 0.01;
 
 /// 对时间有序的 kept 事例数组统计候选窗 [start, stop]（闭区间）与两侧
 /// 基线窗 [start−1s, start−10ms) ∪ (stop+10ms, stop+1s] 的 ACD 计数。

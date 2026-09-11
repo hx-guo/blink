@@ -322,4 +322,10 @@ pub enum Instrument {
     Grid04,
     /// 天格 GRID-07（2024-01 .. 2024-07）
     Grid07,
+    /// GECAM-A（25 GRD + 8 CPD，2022-10 起）
+    GecamA,
+    /// GECAM-B（25 GRD + 8 CPD，2020-12 起）
+    GecamB,
+    /// GECAM-C / HEBS（12 GRD + 2 CPD，2022-07 .. 2025-02）
+    GecamC,
 }
