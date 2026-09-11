@@ -39,6 +39,7 @@ SIG_GUARD = 0.020       # 显著候选两侧各挖掉的秒数
 N_SIM = int(os.environ.get("GB_NSIM", 20))          # 每段每个档的模拟重抽次数
 MAX_SEGMENTS = int(os.environ.get("GB_MAXSEG", 12))  # 每小时段数上限，在合规段里均匀抽
 BINS_US = (1.0, 10.0, 100.0, 1000.0, 10000.0)
+TAIL_MAX = 16          # 占据数直方的最高格（末格含"≥16"）
 # SAA 的地理框（宽松取，宁可多切）：经度 −100..+45，纬度 −55..+5
 SAA_LON, SAA_LAT = (-100.0, 45.0), (-55.0, 5.0)
 # IGRF 偶极北极（约 2020 纪元）
@@ -136,16 +137,19 @@ def fano_curve(t, t0, t1, bins_us):
         bw = bw_us * 1e-6
         nb = int((t1 - t0) / bw)
         if nb < 200 or t.size == 0:
-            out[bw_us] = (np.nan, np.nan, nb)
+            out[bw_us] = (np.nan, np.nan, nb, np.zeros(TAIL_MAX, np.int64))
             continue
         idx = ((t - t0) / bw).astype(np.int64)
         idx = idx[(idx >= 0) & (idx < nb)]
         _, c = np.unique(idx, return_counts=True)
+        # 占据数直方（1..TAIL_MAX，末格是"≥TAIL_MAX"）。**fa 的膨胀只由这条尾巴决定**，
+        # 而 Fano 只概括了它的二阶矩——两个都要，不能用 Fano 推尾巴。
+        occ = np.bincount(np.clip(c, 0, TAIL_MAX), minlength=TAIL_MAX + 1)[1:]
         c = c.astype(np.float64)
         s1_, s2_ = c.sum(), (c * c).sum()
         mean = s1_ / nb
         var = (s2_ - s1_ * s1_ / nb) / (nb - 1)
-        out[bw_us] = ((var / mean if mean > 0 else np.nan), mean, nb)
+        out[bw_us] = ((var / mean if mean > 0 else np.nan), mean, nb, occ)
     return out
 
 
@@ -246,17 +250,21 @@ def main():
 
             # 簇大小分布：过离散的量与"多少事例成簇"是同一件事的两面，
             # 而复合泊松的尾巴（= fa 被抬多少）只由这张分布决定，所以逐段存下来。
+            # 上限必须高过 `min_number = 8`：一个簇要变成候选得凑够 8 个计数，
+            # 用 m >= 6 对账会系统性高估（实测高 1.6 倍）。
             csz = np.diff(np.concatenate((head, [ts.size])))
-            csz_hist = np.bincount(np.clip(csz, 0, 6), minlength=7)[1:].tolist()
+            csz_hist = np.bincount(np.clip(csz, 0, TAIL_MAX), minlength=TAIL_MAX + 1)[1:].tolist()
 
             sim_pre = {b: [] for b in BINS_US}
             sim_post = {b: [] for b in BINS_US}
+            sim_occ = {b: [] for b in BINS_US}
             sim_kept = []
             for _ in range(N_SIM):
                 sp, sq, nk = simulate(ts.size, s0, s1, share, rng, TAU, BINS_US)
                 for b in BINS_US:
                     sim_pre[b].append(sp[b][0])
                     sim_post[b].append(sq[b][0])
+                    sim_occ[b].append(sq[b][3])
                 sim_kept.append(nk)
 
             row = {
@@ -273,6 +281,9 @@ def main():
                 "csz_mean2": float((csz * csz).mean()),   # E[m²]，复合泊松尾巴要用
             }
             for b in BINS_US:
+                row[f"occ_pre_{b:g}"] = pre[b][3].tolist()
+                row[f"occ_post_{b:g}"] = post[b][3].tolist()
+                row[f"occ_sim_{b:g}"] = np.sum([sim_occ[b][i] for i in range(N_SIM)], 0).tolist()
                 row[f"F_pre_{b:g}"] = pre[b][0]
                 row[f"F_post_{b:g}"] = post[b][0]
                 row[f"lam_{b:g}"] = pre[b][1]
