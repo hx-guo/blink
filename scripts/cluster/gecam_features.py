@@ -85,6 +85,8 @@ def ladder(hdus):
     length = int(broken[0]) + 1 if broken.size else e_min.size
     above = np.flatnonzero(e_max[:length] > MIN_ENERGY_KEV)
     return (int(above[0]) if above.size else length), length
+
+
 def merge_gain_pairs(time, gain, dead_time_us):
     """同探头双增益配对，返回"留下哪些"的布尔掩模。
 
