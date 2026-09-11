@@ -34,8 +34,10 @@ fn open_connection() -> Connection {
 ///
 /// 先前这里写死 512 GB（比 422 GB 的库还大一点），在受限节点上见过开库处
 /// core dump。**但那个故障的机制不是"写死"**——见下面"这个函数目前是空转的"。
-/// 复盘时另有一条实测口径要记住：`hep_sub -mem 20000` **并不压地址空间**，
-/// 那一档下 `ulimit -v` 仍然是 95 GB；要造这个故障条件只能用 `ulimit -v` 直接设。
+/// 复盘时另有一条实测口径要记住：`hep_sub -mem` **并不压地址空间**，作业内
+/// 实测 `ulimit -v` 是 **100 GB 的固定值、不随 `-mem` 变**（`-mem 2000` 的探针
+/// 作业实测同一个值），cgroup 的 `memory.max` / `cpu.max` 在作业内一个都读不到；
+/// 要造这个故障条件只能用 `ulimit -v` 直接设。
 ///
 /// 两条上界：
 /// * **库文件本身的大小**——映射比文件还大的区间没有任何意义。
@@ -233,11 +235,16 @@ mod tests {
 
     #[test]
     fn the_cap_does_not_bind_on_the_farm() {
-        // 这一条是防止误解的：`hep_sub -mem 20000` 并不压地址空间，那一档下
-        // `ulimit -v` 实测仍是 95 GB。95 GB 放得下 32 条，而 affinity 只给 24,
-        // 所以这道闸在农场上不会合上——农场那个无声被杀是 RSS 超 -mem，
-        // 只能靠 BLINK_THREADS 挡。
-        assert!(connections_within(95 * 1_000_000_000) > 24);
+        // 这一条是防止误解的：`hep_sub -mem` 并不压地址空间，作业内实测
+        // `ulimit -v` 是 100 GB 的固定值、不随 `-mem` 变（cgroup 的
+        // memory.max / cpu.max 在作业内一个都读不到）。100 GB 放得下 34 条，
+        // 而 affinity 在 24 核那档只给 24，**闸合不上**——所以线程数失控
+        // 只能靠 BLINK_THREADS 挡，不能指望这道闸。
+        //
+        // 农场上作业被杀的机制未定，这里不写机制：`-mem` 是不是强制上限，
+        // 两个方向的实测都有（GECAM-B 在 -g hxmt 上 16000/20000 两路被 held，
+        // SVOM 在 8000 边界上差 0.5% 被 held；GBM 从 1 到 4000 九个值全跑完）。
+        assert!(connections_within(100 * 1024 * 1024 * 1024) > 24);
     }
 
     #[test]
