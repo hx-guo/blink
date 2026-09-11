@@ -69,12 +69,24 @@ def lambda3_uniform(counts, m):
 
 
 def pois_ge(k, lam):
+    """P(X ≥ k)，X ~ Poisson(lam)。
+
+    **直接累尾，不用 `1 − 前 k 项`。** 后者在尾部小的时候是灾难性相消：λ ~ 1e-3 时
+    k = 3 已有 2.6e-8 的相对误差，**k ≥ 5 直接返回 0**（真值 8.3e-18）；λ = 1.3e-5、
+    k = 3 时错 21%。本判据要在 1e-3 附近比大小，而全池里 λ₃ 能小到 1e-6 量级，
+    正落在会出错的那一档。直接累尾在同样参数下相对误差 ≤ 5e-15。
+    """
     if k <= 0:
         return 1.0
     if lam <= 0:
         return 0.0
-    s = sum(math.exp(-lam + i * math.log(lam) - math.lgamma(i + 1)) for i in range(k))
-    return max(0.0, 1.0 - s)
+    total = 0.0
+    for i in range(k, k + 1000):
+        term = math.exp(-lam + i * math.log(lam) - math.lgamma(i + 1))
+        total += term
+        if term < 1e-18 * max(total, 1e-300):
+            break
+    return min(1.0, total)
 
 
 def dead_time(tick, det, gap=DEADTIME_TICKS):
