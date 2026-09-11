@@ -22,6 +22,53 @@ import os
 import numpy as np
 
 
+def dt_coverage(rows, root):
+    """复现 `grid03b_dt_series.py` 的"每天按文件大小取中间两个"，量它排除掉了哪一档速率。
+
+    未决项 6 的"788 天没变过"就建立在这个子集上，而该节自己写着 22–32 tick 的偏离是
+    **高计数率下估计量的伪影**。若这个选法排除的恰是高速率过境，那条结论的适用范围就
+    被悄悄收窄了——**选样准则与估计量的已知失效模式相关**。这里把它变成一个数。
+    """
+    rate = {r["pass_file"]: _f(r["rate_cps"]) for r in rows if r["rate_cps"]}
+    picked = set()
+    for daydir in sorted(glob.glob(root + "/*/*/*")):
+        vers = sorted(glob.glob(daydir + "/evt_v*"))
+        if not vers:
+            continue
+        files = sorted(glob.glob(vers[-1] + "/*.fits"), key=os.path.getsize)
+        if not files:
+            continue
+        mid = len(files) // 2
+        pick = files[max(mid - 1, 0):mid + 1] if len(files) > 1 else files
+        picked.update(os.path.basename(f) for f in pick)
+    a_in = np.array([v for k, v in rate.items() if k in picked])
+    a_out = np.array([v for k, v in rate.items() if k not in picked])
+    if a_in.size == 0 or a_out.size == 0:
+        print("   无法复现选样（文件名对不上？）")
+        return
+    print("   进样本 %d 次，未进 %d 次（覆盖 %.1f%%）"
+          % (a_in.size, a_out.size, 100.0 * a_in.size / (a_in.size + a_out.size)))
+    print("   %-10s %9s %9s %9s %9s %9s" % ("", "p5", "中位", "p95", "p99", "最大"))
+    for name, a in (("进样本", a_in), ("未进样本", a_out)):
+        print("   %-10s %9.0f %9.0f %9.0f %9.0f %9.0f"
+              % (name, np.percentile(a, 5), np.median(a), np.percentile(a, 95),
+                 np.percentile(a, 99), a.max()))
+    print("   中位之比（未进 / 进）= %.2f 倍，最大之比 = %.2f 倍"
+          % (np.median(a_out) / max(np.median(a_in), 1e-9), a_out.max() / max(a_in.max(), 1e-9)))
+    for t in (3000, 5000, 8000, 15000):
+        n_in = int((a_in > t).sum())
+        n_out = int((a_out > t).sum())
+        print("   速率 > %5d c/s：进样本 %d 次，未进样本 %d 次" % (t, n_in, n_out))
+    hi_in = (a_in > 5000).sum()
+    print()
+    if hi_in == 0:
+        print("   ⇒ **高速率档（> 5000 c/s）在死时间样本里一次都没有**：未决项 6 的"
+              "「788 天没变过」")
+        print("     完全没覆盖这一档。现行结论若有任何一条落在这个速率范围，就要额度重算。")
+    else:
+        print("   ⇒ 高速率档在样本里有 %d 次，覆盖不是零，但仍需按比例限定措辞。" % hi_in)
+
+
 def _f(v):
     try:
         return float(v)
@@ -174,6 +221,13 @@ def main():
     print("   注：分箱账只含定上位的秒数；位置来源逐过境记在 trip_*.csv 的 pos_src 列。")
     src = collections.Counter(r["pos_src"] for r in ok)
     print("   位置来源：" + "，".join("%s %d 次" % kv for kv in sorted(src.items())))
+
+    print()
+    print("=== 5. 顺带：未决项 6 的死时间样本排除了哪一档速率 ===")
+    if os.path.isdir(root):
+        dt_coverage(ok, root)
+    else:
+        print("   拿不到归档，跳过")
 
 
 if __name__ == "__main__":
