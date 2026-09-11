@@ -7,6 +7,18 @@
 分类依据是**测出来的** T90（扣本底后累积计数的 5%–95%，见 scripts/cluster/grid_t90.py）
 和偶极磁纬，不是搜索窗长——窗长顶在 1 ms 的搜索上限上，是搜索参数不是时长测量。
 
+讲法（三张图共同的口径，改图前先读这一段）：
+
+**天格四颗星里只有 GRID-03B 探测到了 TGF。** 另外三颗给出的 B 角候选**在计数上确实
+显著**——净超出中位几十个计数、过的是 fa ≤ 1e-5 的门——但能谱与本底一致、时长约 3 ms、
+集中在 |偶极磁纬| ≥ 33°、零闪电关联，不符合 TGF 的任何一条特征；而它们几乎不出现在
+03B 上。这三颗星的探头共帧读出，因此**我们无法区分"它们是一类高磁纬的非 TGF 事件"
+和"它们是慢读出星特有的伪信号"**。
+
+**不要把 B 角写成"本底涨落"。** 与本底一致的是**能谱**，不是**计数**：那些候选的净超出
+是真实的显著超出。这句话上一轮写错过一次。
+
+
 用法:
     python3 scripts/plot_grid_talk.py <features_sig.csv> <t90.csv> <tgfs_*.json ...> \
         -o <目录> [--lightcurves <dir>]
@@ -45,6 +57,14 @@ DEAD_TIME_NAME = {"GRID-03B": "探头死时间", "GRID-02": "读出帧长",
 ENERGY_THRESHOLD_KEV = 30.0
 
 POLE_LAT, POLE_LON = np.radians(80.7), np.radians(-72.7)
+
+# GECAM-C 的带电粒子探测器（CPD）本底率，用来给天格 B 角一条不依赖天格读出的外部
+# 参照。口径（GECAM 侧 2026-09-11 核定）：GECAM-C 17 天、61558 个候选；分层取
+# `bin_size_best > 950 µs` ∧ |偶极磁纬| ≥ 33° ∧ count ≥ 20，得 236 个候选 / 61 个
+# 独立 episode；率 = 候选两侧各 1 s 基线窗内的 CPD 计数 / 2 s 标称窗宽（未夹 GTI，
+# C 星上只有 0.38% 的基线窗被 GTI 切到）。三个筛选条件都不用 CPD，构造上无循环。
+GECAM_CPD_RATE_SELECTED = 3205   # c/s，该层候选处的中位
+GECAM_CPD_RATE_ALL = 117         # c/s，全样本候选处的中位
 
 
 def dipole_lat(lat_deg, lon_deg):
@@ -105,6 +125,8 @@ def load(features, t90, tgfs, particles=None):
         h95=np.array([_f(t[k].get("hard_e_95", "")) for k in key]),
         null95=np.array([_f(t[k]["null_p95"]) for k in key]),
         nullp=np.array([_f(t[k]["null_p"]) for k in key]),
+        # 扣本底后的净超出计数。讲 B 角时必须报这一列：与本底一致的是能谱不是计数。
+        excess=np.array([_f(t[k]["excess"]) for k in key]),
     )
     d["assoc"] = np.array([assoc.get(k, False) for k in key])
     f3 = load_particles(particles) if particles else {}
@@ -162,9 +184,11 @@ def fig_two_populations(d, out):
     # 两个角的说明放进标题，图里只留最短的标签——B 角那一带点密，长文本压不下去
     ax.text(24, 31.5, "A 角 短·低磁纬 %d 个\n全是 GRID-03B" % int(a.sum()),
             fontsize=12.5, color=RED, va="top", ha="left", linespacing=1.5)
-    ax.text(11500, 34.5, "B 角 毫秒·高磁纬 %d 个\n%d 个来自另外三星"
+    # B 角的标签放在 33° 线下方的右侧：那一块是空的（长候选的 |磁纬| 最小值 33.3°），
+    # 放在角里会压在最密的那团点上。
+    ax.text(11500, 30, "B 角 毫秒·高磁纬 %d 个\n%d 个来自另外三星"
             % (int(b.sum()), int((b & ~is03b).sum())),
-            fontsize=12.5, color=BLUE, va="bottom", ha="right", linespacing=1.5)
+            fontsize=12.5, color=BLUE, va="top", ha="right", linespacing=1.5)
     ax.set_title("(a) 真实时长 × 磁纬：两个干净角 + %d 个中间带" % int(m.sum()), pad=10)
     handles = [Line2D([], [], marker="o", ls="", ms=9, mfc=c, mec="k", mew=0.5,
                       label="%s (%d)" % (sat, int((d["sat"] == sat).sum())))
@@ -195,8 +219,9 @@ def fig_two_populations(d, out):
     b_pow = np.median(d["h95"][b & ok95]) if (b & ok95).any() else np.nan
     ax.text(0.02, 0.03,
             "误差棒只画在 %d 个闪电证实上（暴内事例自举 16%%–84%%）\n"
-            "B 角硬度中位 %.2f、自举 95%% 上限中位 %.2f：是测出来与本底同谱，不是没功效"
-            % (int(asc.sum()), np.median(d["hard"][b]), b_pow),
+            "B 角硬度中位 %.2f、自举 95%% 上限中位 %.2f：是测出来与本底同谱，不是没功效\n"
+            "但它们的计数是真的——净超出中位 %.0f 个，过的是 fa ≤ 1e-5 的门"
+            % (int(asc.sum()), np.median(d["hard"][b]), b_pow, np.median(d["excess"][b])),
             transform=ax.transAxes, fontsize=11, va="bottom", color="0.3", linespacing=1.5)
     ax.set_title("(b) 时长越短谱越硬", pad=10)
 
@@ -237,7 +262,15 @@ def fig_two_populations(d, out):
     fig.suptitle("天格 %d 个显著候选：只有 GRID-03B 探测到 TGF——A 角 %d 个全是它，"
                  "B 角 %d/%d 来自另外三星（四路共帧读出，帧长是 03B 死时间的 6 倍）"
                  % (len(d["fa"]), int(a.sum()), int((b & ~is03b).sum()), int(b.sum())), fontsize=16)
-    fig.tight_layout(rect=(0, 0, 1, 0.92)); fig.savefig(out, dpi=160); print("wrote", out)
+    # 结论的边界与图同框：B 角是真实的显著超出（不是本底涨落），但它来自共帧读出的星，
+    # "高磁纬的非 TGF 事件"与"慢读出星特有的伪信号"这两种解释用现有数据分不开。
+    fig.text(0.5, 0.015,
+             "B 角的净超出是真的（中位 %.0f 个计数，fa ≤ 1e-5）——与本底一致的是能谱不是计数。"
+             "它们全来自共帧读出的星，"
+             "「一类高磁纬的非 TGF 事件」与「慢读出星特有的伪信号」用现有数据分不开。"
+             % np.median(d["excess"][b]),
+             ha="center", fontsize=12.5, color="0.3")
+    fig.tight_layout(rect=(0, 0.045, 1, 0.92)); fig.savefig(out, dpi=160); print("wrote", out)
     plt.close(fig)
 
 
@@ -287,10 +320,23 @@ def fig_map(d, out):
     leg2.get_title().set_fontsize(13)
 
     ax.set_title("天格候选的地理分布：A 角在低纬雷暴区、B 角在高磁纬海域\n"
-                 "A 角 %d 个与 %d 个闪电证实的 TGF 全部来自 GRID-03B；"
-                 "B 角的同型事件在 GECAM 上出现于带电粒子沉降环境"
+                 "A 角 %d 个与 %d 个闪电证实的 TGF 全部来自 GRID-03B"
                  % (int(a.sum()), int(asc.sum())),
                  fontsize=15.5, pad=12, linespacing=1.5)
+    # 跨仪器线索。措辞与数字由 GECAM 侧给定（2026-09-11 核定），照抄不改写：
+    # 立论只能立在**环境率**上，不能立在 CPD 的符合命中率上——那一层窗长约 1 ms、
+    # 当地 CPD 率 3205 c/s，纯本底下撞上至少一个 CPD 计数的期望本来就是 96%，
+    # 任何未归一化的命中率（曾引过的 93% 与 85.6%）在那里都不含信息。
+    # 放在两组图例**下面**（图例锚在 -0.04，两三行高），不能用 fig 坐标，那会压在图例上。
+    ax.text(0.5, -0.42,
+            "B 角那批候选的同型事件在 GECAM-C 上也出现（61 个独立 episode）：一路独立的"
+            "带电粒子探测器测到这些时刻的本底率中位 %d 计数/秒，\n"
+            "全样本中位 %d 计数/秒，高出 %.0f 倍。结论只对计数 ≳ 20 的那一支成立，"
+            "更暗的一支这项测量分不开（8–15 计数档 134–135 计数/秒，与全样本无异）。"
+            % (GECAM_CPD_RATE_SELECTED, GECAM_CPD_RATE_ALL,
+               GECAM_CPD_RATE_SELECTED / GECAM_CPD_RATE_ALL),
+            transform=ax.transAxes, ha="center", va="top", fontsize=12.5,
+            color="0.3", linespacing=1.6)
     fig.savefig(out, dpi=160, bbox_inches="tight"); print("wrote", out)
     plt.close(fig)
 
