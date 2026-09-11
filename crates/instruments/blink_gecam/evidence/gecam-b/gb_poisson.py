@@ -31,7 +31,10 @@ from astropy.io import fits
 
 import gb_feat as gf
 
-TAU = 150e-9            # 跨探头合并容差
+# 跨探头合并容差。**0 = 时戳精确相等才合并**（不是不合并）——一次带电粒子穿越在
+# 多路上留下的是完全相同的时戳（第 32 条：`mf` 与 `f₂` 逐位相等），而真 TGF 的光子
+# 是真正不同的时刻到达的。`merge_cross_det` 用 `Δt ≤ τ`，τ=0 即 `Δt == 0`。
+TAU = float(os.environ.get("GB_TAU", 150e-9))
 SEG_SECONDS = 10.0      # 安静段长度
 GTI_MARGIN = 2.0        # GTI 两端各削掉的秒数
 SIG_FA = 1e-5           # 第二档对照里当作"显著候选"的阈
