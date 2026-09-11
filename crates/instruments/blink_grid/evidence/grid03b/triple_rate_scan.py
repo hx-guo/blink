@@ -30,8 +30,10 @@ c/s）：r₃ 平在 1.0–2.0 个/s、事例占比 8×10⁻⁴–1.7×10⁻²�
 用法（农场 N 分片）：
     python3 triple_rate_scan.py <chunk> <nchunk> <outdir> [--sat GRID-03B] [--seg 10]
 产物：
-    <outdir>/trip_NN.csv    逐过境一行
-    <outdir>/mlat_NN.csv    |磁纬| 分箱的累计账
+    <outdir>/trip_NN.csv     逐过境一行
+    <outdir>/mlat_NN.csv     |磁纬| 分箱的累计账（跨全部过境）
+    <outdir>/mlatdet_NN.csv  **逐过境 × 逐磁纬格**的明细——有了它，事后扣掉某批过境
+                             （如脉冲过境）或按速率分档重出磁纬曲线都不必重跑
 """
 
 import argparse
@@ -183,6 +185,11 @@ def main():
     acc_s = np.zeros(nb)
     no_pos_s = 0.0
 
+    # 逐过境 × 逐磁纬格的明细。**把汇总做成可逆的**：有了它，事后要扣掉某批过境
+    # （如脉冲过境）或按速率分档重出磁纬曲线，都不必重跑——先前的 mlat_NN.csv 是
+    # 跨全部过境累加死的，一旦发现 5% 的脉冲过境主导了曲线就只能重跑。
+    bh = open(os.path.join(args.outdir, "mlatdet_%02d.csv" % args.chunk), "w")
+    bh.write("pass_file,mlat_lo,seconds,n_events,n_in3,n_clusters\n")
     fh = open(os.path.join(args.outdir, "trip_%02d.csv" % args.chunk), "w")
     fh.write("sat,day,version,pass_file,gti_start,gti_stop,dur_s,n_kept,rate_cps,"
              "k3,k4,r3_per_s,frac_ev_in3,max_mult,"
@@ -256,6 +263,7 @@ def main():
             mlo = mhi = mbest = float("nan")
             best_frac = -1.0
             pos_s = 0.0
+            loc = {}
             edges = np.arange(gs, ge + args.seg, args.seg)
             # t 已排序 ⇒ 用 searchsorted 定段边界。先前对每一段都做整数组布尔掩码，
             # 那是 O(段数 × 事例数)：一次 2 小时的过境 720 段 × 1e8 个事例，跑不完。
@@ -283,6 +291,11 @@ def main():
                 acc_k3[b] += int(bx.sum())
                 acc_s[b] += hi - lo
                 pos_s += hi - lo
+                v = loc.setdefault(b, [0.0, 0, 0, 0])
+                v[0] += hi - lo
+                v[1] += nev
+                v[2] += int(szx[bx].sum())
+                v[3] += int(bx.sum())
                 mlo = ml if not np.isfinite(mlo) else min(mlo, ml)
                 mhi = ml if not np.isfinite(mhi) else max(mhi, ml)
                 f = int(szx[bx].sum()) / nev
@@ -292,12 +305,19 @@ def main():
             def fmt(v):
                 return "%.2f" % v if np.isfinite(v) else ""
 
+            for b in sorted(loc):
+                v = loc[b]
+                bh.write("%s,%.0f,%.1f,%d,%d,%d\n"
+                         % (base, MLAT_EDGES[b], v[0], v[1], v[2], v[3]))
+
             fh.write("%s,%s,%s,%s,%.3f,%.3f,%.1f,%d,%.1f,%d,%d,%.4f,%.6f,%d,%s,%s,%s,%s,%.1f,\n"
                      % (args.sat, day, ver, base, gs, ge, dur, t.size, t.size / dur,
                         k3, k4, k3 / dur, frac, int(sz.max()),
                         fmt(mlo), fmt(mhi), fmt(mbest), src, pos_s))
             fh.flush()
+            bh.flush()
     fh.close()
+    bh.close()
 
     with open(os.path.join(args.outdir, "mlat_%02d.csv" % args.chunk), "w") as mf:
         mf.write("mlat_lo,mlat_hi,seconds,n_events,n_in3,n_clusters\n")
