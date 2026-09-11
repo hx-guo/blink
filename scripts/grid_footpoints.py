@@ -79,7 +79,9 @@ def main():
     w.writerow(["sat", "start", "fa", "dur_us", "lon", "lat", "alt_km", "cls", "footN_lon", "footN_lat", "pathN_km", "reachedN", "footS_lon", "footS_lat", "pathS_km", "reachedS", "travelN_ms", "travelS_ms"])
     for i, r in enumerate(rows):
         cls = "short" if float(r["dur_us"]) < 500 else "long"
-        w.writerow([r["sat"], r["start"][:23], r["fa"], r["dur_us"], f"{lon[i]:.3f}", f"{lat[i]:.3f}", f"{h[i]:.1f}", cls,
+        # start 写全精度：截到毫秒会把 1 ms 的定位误差传给下游（未决项 16 的缺陷二）。
+        # 下游要和旧表对齐时自己取 start[:23] 即可。
+        w.writerow([r["sat"], r["start"], r["fa"], r["dur_us"], f"{lon[i]:.3f}", f"{lat[i]:.3f}", f"{h[i]:.1f}", cls,
                     f"{fn_lon[i]:.3f}", f"{fn_lat[i]:.3f}", f"{pn[i]:.0f}", int(okn[i]), f"{fs_lon[i]:.3f}", f"{fs_lat[i]:.3f}", f"{ps[i]:.0f}", int(oks[i]),
                     f"{pn[i] / (0.95 * C_KM_S) * 1e3:.1f}", f"{ps[i] / (0.95 * C_KM_S) * 1e3:.1f}"])
         print("%s %s %-5s (%7.2f,%6.2f) -> N (%7.2f,%6.2f) %5.0f km %s | S (%7.2f,%6.2f) %5.0f km %s" % (
