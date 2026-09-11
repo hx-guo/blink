@@ -21,6 +21,17 @@ HXMT 发现：**本底窗半边落在数据缺口上 ⇒ λ 低估约 2 倍 ⇒ 
 外加一条纯几何的富集检验：候选的本底窗跨缺口的比例，对照是**按活时间均匀撒点**
 的同一比例。**富集说明候选偏爱 GTI 边缘，那本身就是可疑的。**
 
+**⚠️ 缺口必须分三类，混在一起会得出一个构造决定的假富集**（HXMT 在这上面栽过）：
+
+* **正常**——窗内没有任何缺口；
+* **小时（chunk）边界**——窗伸到本小时之外。搜索本来就把本底窗夹到 chunk 边界，
+  所以**靠近整点的候选必然"有缺口"，这是构造决定的、不是发现**。HXMT 那个
+  "距整点 < 1 s 的 9/9 都有大缺口、富集 119 倍"就是这么来的；
+* **GTI 内部缺口**——窗落在本小时之内、却落在活时间之外。**只有这一类需要查。**
+
+**C 星在这件事上是全队最可能有真效应的一颗**（占空比 62.7%、缺口 82.4% 在极冠，
+那多半是真实的内部缺口而不是文件边界），**也正因如此最不能容忍混进边界效应**。
+
 用法: gc_bgwindow_gap.py <data 根目录> [每小时对照点数=2000]
 """
 
@@ -61,9 +72,24 @@ def newest(pattern):
     return best[1] if best else None
 
 
-def live_fraction(a, b, lo, hi):
-    """[lo, hi] 与 GTI 段 (a, b) 的交集长度 / (hi - lo)。"""
-    return float(np.clip(np.minimum(b, hi) - np.maximum(a, lo), 0, None).sum()) / (hi - lo)
+def overlap(a, b, lo, hi):
+    """[lo, hi] 与若干段 (a, b) 的交集长度。"""
+    return float(np.clip(np.minimum(b, hi) - np.maximum(a, lo), 0, None).sum())
+
+
+def dead_split(a, b, lo, hi, hour_start, hour_stop):
+    """把 [lo, hi] 的死时间拆成「小时边界造成的」与「GTI 内部缺口造成的」两份。
+
+    边界那一份是**构造决定的**（搜索本来就把本底窗夹到 chunk 边界），
+    算进富集只会得到一个假结果，所以必须与内部缺口分开。
+    """
+    width = hi - lo
+    inside_hour = overlap(np.array([hour_start]), np.array([hour_stop]), lo, hi)
+    boundary = (width - inside_hour) / width
+    # 窗落在本小时之内的那一段里，有多少不在活时间上
+    live_inside = overlap(np.maximum(a, hour_start), np.minimum(b, hour_stop), lo, hi)
+    internal = (inside_hour - live_inside) / width
+    return boundary, max(internal, 0.0)
 
 
 def main():
@@ -71,8 +97,8 @@ def main():
     controls = int(sys.argv[2]) if len(sys.argv) > 2 else 2000
     rng = np.random.default_rng(20260911)
 
-    rows = []          # (dead_search, dead_audit, rate_search, rate_audit, n_bg)
-    ctrl_dead = []
+    rows = []          # (boundary, internal, dead_audit_internal, rate_search, rate_audit)
+    ctrl_internal = []
     for path in sorted(glob.glob(f"{root}/**/*_signals.json", recursive=True)):
         signals = json.load(open(path))
         by_hour = {}
@@ -92,17 +118,22 @@ def main():
                     b = np.asarray(gti["STOP"], float)
             except Exception:
                 continue
+            # 本小时的边界：整点到整点
+            hour_start = met(iso[:13] + ":00:00")
+            hour_stop = hour_start + 3600.0
             for s in group:
                 t0 = met(s["start"]) + s["delay"]
                 t1 = t0 + s["bin_size_best"]
-                ds = 1.0 - live_fraction(a, b, t0 - SEARCH_HALF, t1 + SEARCH_HALF)
-                da = 1.0 - live_fraction(a, b, t0 - AUDIT_HALF, t1 + AUDIT_HALF)
+                bd, itn = dead_split(a, b, t0 - SEARCH_HALF, t1 + SEARCH_HALF,
+                                     hour_start, hour_stop)
+                _, itn_audit = dead_split(a, b, t0 - AUDIT_HALF, t1 + AUDIT_HALF,
+                                          hour_start, hour_stop)
                 acd = s.get("acd") or {}
                 n_bg = acd.get("n_bg")
                 rate_search = s["mean"] / s["bin_size_best"]
                 rate_audit = (n_bg / (2.0 * AUDIT_HALF)) if n_bg else np.nan
-                rows.append((ds, da, rate_search, rate_audit))
-            # 对照：按活时间均匀撒点
+                rows.append((bd, itn, itn_audit, rate_search, rate_audit))
+            # 对照：按活时间均匀撒点，只记**内部缺口**那一份
             live = np.maximum(b - a, 0)
             if live.sum() <= 0:
                 continue
@@ -110,37 +141,47 @@ def main():
             u = rng.uniform(0, 1, controls)
             t = a[pick] + u * live[pick]
             for centre in t:
-                ctrl_dead.append(1.0 - live_fraction(a, b, centre - SEARCH_HALF,
-                                                     centre + SEARCH_HALF))
+                _, itn = dead_split(a, b, centre - SEARCH_HALF, centre + SEARCH_HALF,
+                                    hour_start, hour_stop)
+                ctrl_internal.append(itn)
 
     data = np.array(rows)
-    ds, da, rs, ra = data[:, 0], data[:, 1], data[:, 2], data[:, 3]
-    ctrl = np.array(ctrl_dead)
-    print(f"候选 {ds.size}，对照点 {ctrl.size}")
+    bd, itn, itn_audit, rs, ra = (data[:, k] for k in range(5))
+    ctrl = np.array(ctrl_internal)
+    print(f"候选 {bd.size}，对照点 {ctrl.size}")
 
-    print("\n=== 几何富集：本底窗跨 GTI 缺口的比例 ===")
-    for name, v in (("候选", ds), ("对照（按活时间均匀）", ctrl)):
-        print(f"  {name:20s} 有缺口 {(v > 0).mean() * 100:6.3f}%   "
-              f"缺口占窗 > 10% 的 {(v > 0.1).mean() * 100:6.3f}%   "
-              f"中位缺口占比 {np.median(v):.4f}")
-    enrich = (ds > 0).mean() / max((ctrl > 0).mean(), 1e-9)
-    print(f"  **富集 {enrich:.2f} 倍**（1.0 = 候选不偏爱 GTI 边缘）")
+    print("\n=== 先分三类（边界那一类是构造决定的，不能算进富集）===")
+    normal = (bd <= 0) & (itn <= 0)
+    boundary = bd > 0
+    internal = (~boundary) & (itn > 0)
+    for name, sel in (("正常（窗内无缺口）", normal),
+                      ("小时边界（构造决定，排除）", boundary),
+                      ("GTI 内部缺口（**只看这一类**）", internal)):
+        print(f"  {name:28s} {int(sel.sum()):7d}  {sel.mean() * 100:6.3f}%")
+
+    print("\n=== 几何富集：只用 GTI 内部缺口 ===")
+    for name, v in (("候选", itn[~boundary]), ("对照（按活时间均匀）", ctrl)):
+        print(f"  {name:20s} 有内部缺口 {(v > 0).mean() * 100:6.3f}%   "
+              f"占窗 > 10% 的 {(v > 0.1).mean() * 100:6.3f}%")
+    enrich = (itn[~boundary] > 0).mean() / max((ctrl > 0).mean(), 1e-9)
+    print(f"  **富集 {enrich:.2f} 倍**（1.0 = 候选不偏爱 GTI 内部缺口）")
 
     print("\n=== λ 有没有被压低：两个率估计之比随缺口占比怎么走 ===")
     print("搜索率 = mean / bin_size_best（搜索夹了 GTI）")
     print("审计率 = n_bg / 2 s       （审计**不夹** GTI，跨缺口必然被压低）")
-    ok = np.isfinite(ra) & (ra > 0)
-    print("缺口占比档      n     搜索率/审计率 中位   若搜索夹取生效应约为")
+    ok = np.isfinite(ra) & (ra > 0) & (~boundary)
+    print("（已排除小时边界那一类）")
+    print("内部缺口占比档  n     搜索率/审计率 中位   若搜索夹取生效应约为")
     edges = [(-0.001, 1e-9), (1e-9, 0.05), (0.05, 0.2), (0.2, 0.5), (0.5, 1.01)]
     for lo, hi in edges:
-        sel = ok & (da > lo) & (da <= hi)
+        sel = ok & (itn_audit > lo) & (itn_audit <= hi)
         if sel.sum() < 20:
             continue
         # 审计窗被压低 (1 - da) 倍，搜索窗夹取之后不受影响 ⇒ 比值应约为 1/(1-da)
-        expect = 1.0 / max(1.0 - np.median(da[sel]), 1e-6)
+        expect = 1.0 / max(1.0 - np.median(itn_audit[sel]), 1e-6)
         print(f"  {lo:6.3f}–{hi:<6.3f} {int(sel.sum()):6d}   "
               f"{np.median(rs[sel] / ra[sel]):14.3f}   {expect:14.3f}")
-    clean = ok & (da <= 1e-9)
+    clean = ok & (itn_audit <= 1e-9)
     if clean.sum() >= 20:
         r = rs[clean] / ra[clean]
         print(f"\n  **窗内无缺口那一档是口径对齐的前提**：比值中位 "
