@@ -6,7 +6,8 @@ No.    Name      Ver    Type      Cards   Dimensions   Format
   2  GTI           1 BinTableHDU           1R x 2C
   3  EVENTS01      1 BinTableHDU      6407659R x 7C   [D, I, B, E, B, B, B]
   ...                                                 到 EVENTS25
-GECAM-C 同一套结构，只是 EBOUNDS 470 道、探头到 EVENTS12。
+GECAM-C 同一套结构，只是探头到 EVENTS12，EBOUNDS 470 道——2022-08-03 .. 10-15
+那 1,121 小时是 896 道，见 `ebounds_hdu`。
 */
 
 use blink_core::error::Error;
@@ -17,12 +18,11 @@ mod events_hdu;
 mod gti_hdu;
 
 use ebounds_hdu::EboundsHdu;
-pub use ebounds_hdu::OVERFLOW_CHANNEL;
 pub use events_hdu::TimeReversals;
 use events_hdu::{EventsHdu, EventsHduIterator};
 use gti_hdu::GtiHdu;
 
-use crate::types::event::{MIN_CHANNEL, MIN_ENERGY_KEV};
+use crate::types::event::{ChannelWindow, MIN_ENERGY_KEV};
 use crate::types::{Event, instrument::Satellite};
 
 /// 探头数的上限，只用来给「一直探到读不着为止」的循环封顶。GECAM-B/A 是
@@ -33,22 +33,23 @@ pub struct EvtFile<S: Satellite> {
     gti: GtiHdu,
     detectors: Vec<EventsHdu<S>>,
     time_reversals: TimeReversals,
+    /// 本文件的事例准入道号窗，由本文件的 EBOUNDS 现算。**不是编译期常量**
+    /// ——归档里有两把能量梯，见 [`ebounds_hdu`]。
+    channels: ChannelWindow,
 }
 
 impl<S: Satellite> EvtFile<S> {
     pub fn from_fits_file(path: &str) -> Result<Self, Error> {
         let mut fptr = fitsio::FitsFile::open(path)?;
 
-        // 能量梯必须是标定过的那一条，否则 `Event::keep` 的道号阈值含义就变了
+        // 能量梯必须是标定过的那把尺子（ch0 = 2.00 keV、梯内逐道连续、梯顶
+        // 10053.5 keV），梯长与能阈道由这张表自己给出——**归档里有两把梯子，
+        // 同一个道号在它们上面差一倍能量**，照搬道号会把能窗整个搬错位。
         let ebounds = EboundsHdu::from_fptr(&mut fptr)?;
-        ebounds.verify()?;
-        // 再正面核对一次能阈：切在 ch54 的前提是 ch54 仍然是 40 keV 那一道
-        let expected = ebounds.channel_above(MIN_ENERGY_KEV);
-        if expected != MIN_CHANNEL {
-            return Err(Error::InvalidData(format!(
-                "{path}: {MIN_ENERGY_KEV} keV 落在 ch{expected}，不是能阈假定的 ch{MIN_CHANNEL}"
-            )));
-        }
+        let ladder = ebounds
+            .ladder(MIN_ENERGY_KEV)
+            .map_err(|error| Error::InvalidData(format!("{path}: {error}")))?;
+        let channels = ChannelWindow::new(ladder.min_channel, ladder.length);
         let gti = GtiHdu::from_fptr(&mut fptr)?;
 
         // 路数随星而异（A/B 25 路、C 12 路），探到读不着为止
@@ -72,7 +73,13 @@ impl<S: Satellite> EvtFile<S> {
             gti,
             detectors,
             time_reversals,
+            channels,
         })
+    }
+
+    /// 本文件的事例准入道号窗。搜索一律用它，不要用编译期常量。
+    pub fn channels(&self) -> ChannelWindow {
+        self.channels
     }
 
     /// 本文件里的探头路数。

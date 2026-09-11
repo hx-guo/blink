@@ -16,10 +16,17 @@ pub(super) fn from_epoch<S: Satellite>(epoch: &DateTime<Utc>) -> Result<Chunk<S>
     // 唯一落在 WWLLN 覆盖内的那 370 小时曝光整个扔掉。所以 CPD 缺失降级为
     // 「这一小时没有 CPD 数据」，GRD 照常搜，`Signal::acd` 留空。
     //
-    // 只放过「找不到文件」。文件在却读坏了仍旧报错——那是数据出了问题，
-    // 不是产品线本来就没出这个东西。
+    // 放过两种「没有 CPD」：**找不到文件**，以及**文件在但是个占位空壳**
+    // （零行零列的 `EVENTS` 表，实测 28,800 字节）。后者原先被算进「读坏了」
+    // 那一类，代价是 **20 小时完好的 GRD 数据整小时判 corrupt**——那 20 小时
+    // 的 GRD 是好文件（> 1 MB），死的只是 CPD 占位。空壳与真损坏形态上分得开，
+    // 判据见 `CpdFile::from_fits_file` 里的 `is_stub`。
+    //
+    // 除这两种之外，文件在却读坏了仍旧报错——那是数据出了问题，不是产品线
+    // 本来就没出这个东西。**GRD 的空壳照旧致命**：没有事例就没有搜索，
+    // `EvtFile` 那边一条都没放松。
     let cpd_file = match find_cpd::<S>(epoch) {
-        Ok(path) => Some(CpdFile::<S>::from_fits_file(path.to_str().unwrap())?),
+        Ok(path) => CpdFile::<S>::from_fits_file(path.to_str().unwrap())?,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
         Err(error) => return Err(error.into()),
     };
