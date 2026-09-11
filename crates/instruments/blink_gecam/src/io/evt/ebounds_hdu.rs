@@ -85,6 +85,14 @@ impl EboundsHdu {
                 "GECAM EBOUNDS 的能量梯只有 {length} 道，连相邻道的对接都无从谈起"
             )));
         }
+        // 道号是 i16（PI 列就是 `I`）。梯长溢出 i16 会绕成负数，而负的梯长
+        // 不报错、只会让准入一个事例都不收——**静默清空**，正是这套校验要防的
+        // 失效方式。已知的两把梯子是 448 与 896，离这条线还很远。
+        if length > i16::MAX as usize {
+            return Err(Error::InvalidData(format!(
+                "GECAM EBOUNDS 的能量梯有 {length} 道，超出道号能表达的范围"
+            )));
+        }
         let head = self.e_min[0] as f64;
         let tail = self.e_max[length - 1] as f64;
         if (head - LADDER_MIN_KEV).abs() > 0.01 || (tail - LADDER_MAX_KEV).abs() > 1.0 {
