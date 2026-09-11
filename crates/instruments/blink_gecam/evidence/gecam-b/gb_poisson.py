@@ -49,6 +49,8 @@ WGS84_A, WGS84_F = 6378137.0, 1.0 / 298.257223563
 
 # 轨道半径的合规带：B 星约 600 km 圆轨，实测好行 |r| 全落在 6960–6980 km
 R_MIN, R_MAX = 6.6e6, 7.2e6
+# 位姿行离段中点的最大容许间隔（正常间隔 1–2 s）；超过就丢段，不外推
+MAX_POSATT_GAP = 10.0
 
 
 def read_posatt(iso_hour):
@@ -110,10 +112,22 @@ def read_posatt(iso_hour):
 
 
 def at(orbit, when):
+    """取最近的一行位姿。**离得太远就返回 None，不外推。**
+
+    位姿的正常间隔是 1–2 s（一天 4.6–7.6 万行）。缺口两侧若直接取最近行，等于把
+    缺口那一段的位置按边界值"延伸"过去——与 `np.interp` 把缺口连成直线是同一类
+    错误（天格实测有 74 s 位姿缺口、GRID-07 曾错 380 s，足以把辐射带峰灌进低磁纬）。
+    磁纬分档全靠这个值，所以宁可丢段也不外推。
+    """
     if orbit is None or orbit["t"].size == 0:
         return None
     i = int(np.clip(np.searchsorted(orbit["t"], when), 0, orbit["t"].size - 1))
-    return {k: float(orbit[k][i]) for k in ("lon", "lat", "mlat", "vz")}
+    j = max(i - 1, 0)
+    gap = min(abs(orbit["t"][i] - when), abs(orbit["t"][j] - when))
+    if gap > MAX_POSATT_GAP:
+        return None
+    return {k: float(orbit[k][i if abs(orbit["t"][i] - when) <= abs(orbit["t"][j] - when) else j])
+            for k in ("lon", "lat", "mlat", "vz")}
 
 
 def merge_cross_det(t, det, tau):
