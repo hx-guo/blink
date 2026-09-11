@@ -40,7 +40,11 @@ const SEARCH_HOLLOW_MILLISECONDS: f64 = 10.0;
 const CPD_BASELINE_SECONDS: f64 = 1.0;
 
 pub(super) fn search<S: Satellite>(chunk: &Chunk<S>) -> Vec<Signal<Event<S>>> {
-    // 事例准入见 `Event::keep`；再按 GTI 过滤。
+    // 事例准入见 `ChannelWindow::admits`；再按 GTI 过滤。
+    //
+    // **准入的道号窗是逐文件的，不是编译期常量**：归档里有两把能量梯，同一个
+    // 道号在它们上面差一倍能量（GECAM-C 2022-08-03 .. 10-15 是 896 道版，
+    // 40 keV 落在 ch109 而不是 ch54）。窗从该小时自己的 EBOUNDS 现算。
     //
     // 分子分母必须是同一份 GTI。SVOM/GRM 上只在分母上用 GTI，事例流照单全收，
     // 结果是一直在搜 L1B 判为坏时段的数据：数据缺口两端各留着半秒事例，它们
@@ -48,10 +52,11 @@ pub(super) fn search<S: Satellite>(chunk: &Chunk<S>) -> Vec<Signal<Event<S>>> {
     // 假信号」和「高本底假信号」就是这么来的。GECAM 的 GTI 缺口更多更长
     // （一小时常被切成一到四段），同样的坑只会更深。
     let mut n_outside_gti = 0usize;
+    let channels = chunk.evt_file.channels();
     let mut events = chunk
         .evt_file
         .into_iter()
-        .filter(|event| event.keep())
+        .filter(|event| channels.admits(event))
         .filter(|event| {
             let inside = chunk.evt_file.gti_contains(event.time().met());
             if !inside {

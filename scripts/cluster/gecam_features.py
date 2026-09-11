@@ -31,8 +31,15 @@ ARCHIVE = {
     "GECAM-C": ("/gecamfs/hebs/Archived-DATA/GSDC/LEVEL1/daily", None, "GRD_EVT", "CPD_EVT", "gcg", "gcc"),
 }
 EPOCH = {"GECAM-A": (2019, 1, 1), "GECAM-B": (2019, 1, 1), "GECAM-C": (2021, 1, 1)}
-# 事例准入，与 Rust 侧 `Event::keep` 一致
-MIN_CHANNEL, OVERFLOW_CHANNEL, NORMAL_EVT_TYPE = 54, 448, 1
+NORMAL_EVT_TYPE = 1
+# 能阈存能量、切的时候折成道号，折算逐文件做——见 `ladder()`。
+#
+# **原先这里写死着 `MIN_CHANNEL, OVERFLOW_CHANNEL = 54, 448`，注释是"与 Rust 侧
+# `Event::keep` 一致"。一致是对的，两边一起错**：GECAM-C 2022-08-03 .. 10-15 的
+# 1,121 小时用的是一把 896 道的梯子，同一个 40 keV 落在 ch109、ch54 只有 14.16 keV。
+# 而且这个脚本不经 Rust 那道 EBOUNDS 校验，在那一段上不会报错，只会**静默**把
+# 14 keV 以上的事例全收进来，给出错的谱、错的同戳簇集、错的一切。
+MIN_ENERGY_KEV = 40.0
 # CPD 符合的几个窗宽（秒），从候选窗两端各外扩这么多
 CPD_HALF_WIDTHS = (1e-5, 1e-4, 1e-3, 1e-2)
 
@@ -63,6 +70,21 @@ def hour_file(satellite, iso, kind):
     return files[-1] if files else None
 
 
+def ladder(hdus):
+    """从这个文件自己的 EBOUNDS 推出 (能阈道, 梯长)，与 Rust 侧同规则。
+
+    **梯长 = 从 ch0 起 `E_MAX[k-1] == E_MIN[k]` 连续到断开为止的长度**：
+    470 行那版在 ch448 断（那里起是溢出块），896 行那版一路到表尾。
+    **能阈道 = 梯上第一个上边界越过 `MIN_ENERGY_KEV` 的道**（470 版 ch54、
+    896 版 ch109）。两个都不能写死。
+    """
+    eb = hdus["EBOUNDS"].data
+    e_min = np.asarray(eb["E_MIN"], float)
+    e_max = np.asarray(eb["E_MAX"], float)
+    broken = np.flatnonzero(np.abs(e_min[1:] - e_max[:-1]) > e_max[:-1] * 1e-4)
+    length = int(broken[0]) + 1 if broken.size else e_min.size
+    above = np.flatnonzero(e_max[:length] > MIN_ENERGY_KEV)
+    return (int(above[0]) if above.size else length), length
 def merge_gain_pairs(time, gain, dead_time_us):
     """同探头双增益配对，返回"留下哪些"的布尔掩模。
 
@@ -121,6 +143,8 @@ def read_events(path, want_pi):
     """
     times, channels, detectors = [], [], []
     with fits.open(path) as hdus:
+        # 道号窗逐文件现算。CPD 没有能量梯也不按道号切，所以只在要 PI 时查表。
+        min_channel, ladder_length = ladder(hdus) if want_pi else (0, 0)
         for hdu in hdus:
             if not hdu.name.startswith("EVENTS"):
                 continue
@@ -128,7 +152,7 @@ def read_events(path, want_pi):
             keep = np.asarray(data["EVT_TYPE"]) == NORMAL_EVT_TYPE
             pi = np.asarray(data["PI"]) if want_pi else None
             if want_pi:
-                keep &= (pi >= MIN_CHANNEL) & (pi < OVERFLOW_CHANNEL)
+                keep &= (pi >= min_channel) & (pi < ladder_length)
             time = np.asarray(data["TIME"], float)[keep]
             channel = pi[keep] if want_pi else np.zeros(int(keep.sum()), int)
             # CPD 没有 GAIN_TYPE 这一列，也没有双增益支路，不做合并
