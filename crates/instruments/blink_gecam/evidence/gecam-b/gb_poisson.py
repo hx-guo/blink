@@ -35,7 +35,10 @@ import gb_feat as gf
 # 多路上留下的是完全相同的时戳（第 32 条：`mf` 与 `f₂` 逐位相等），而真 TGF 的光子
 # 是真正不同的时刻到达的。`merge_cross_det` 用 `Δt ≤ τ`，τ=0 即 `Δt == 0`。
 TAU = float(os.environ.get("GB_TAU", 150e-9))
-SEG_SECONDS = 10.0      # 安静段长度
+# 安静段长度。**搜索的本底窗是 1 s，所以 1 s 那一档最接近搜索的真实口径、10 s 已是
+# 上界**；但段越短 λ 估得越噪，而 `sf` 对 λ 是凸的 ⇒ 期望被抬高、超出被压低
+# （Jensen）。**真值夹在两者之间，所以要扫段长、报曲线不报单点。**
+SEG_SECONDS = float(os.environ.get("GB_SEG", 10.0))
 GTI_MARGIN = 2.0        # GTI 两端各削掉的秒数
 SIG_FA = 1e-5           # 第二档对照里当作"显著候选"的阈
 SIG_GUARD = 0.020       # 显著候选两侧各挖掉的秒数
