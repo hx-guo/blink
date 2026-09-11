@@ -1,25 +1,36 @@
 """A 星本底的占据数分布 ÷ 泊松——搜索用错了零假设，这里把低估的倍数量出来。
 
-搜索的 `fa` 假定本底是泊松的。但 25 路 GRD 上一次宇宙线穿越会同时点亮好几路，
+搜索的 `fa` 假定本底是泊松的。25 路 GRD 上一次宇宙线穿越会同时点亮好几路，
 于是"窄窗里挤进 k 个计数"的实际概率远高于泊松。**这个比值就是 `fa` 在阈值处
-被低估的倍数**，也是"候选率比配置的假阳性率高四个数量级"的来源。
+被低估的倍数**，也是"候选率比配置的假阳性率高四个数量级"的定量来源。
 
 做法：把一小时的事例流（已按 `Event::keep` 准入、按 GTI 过滤、双增益去重，
 与 Rust 侧逐条对齐）按固定宽度 W 铺成格子，数"出现 >= k 个计数的格数"，
-与 `Poisson(λ = r·W)` 的解析尾概率比。
+与泊松的期望格数比。
 
-**几条口径**：
-* **必须在对数空间算**。泊松尾在 k = 12、λ = 1e-3 时是 1e-60 量级，先算成
+**λ 必须逐小段取，不能整小时一个。** 搜索用的 λ 是局部的（候选两侧各半秒的
+本底窗）。整小时一个 λ 会把一小时之内的速率漂移算成过离散 —— 而且**正是在大
+W 上高估最多**，因为窗越宽、一个格子越能跨过速率的变化。这里把每小时切成
+SEG = 10 s 的段，逐段用该段自己的 λ 算期望再相加：
+
+    E[>=k 的格数] = Σ_s  m_s · P(X >= k | λ_s)，  λ_s = n_s / m_s，m_s = live_s / W
+
+两套口径并排报，**"逐段"那一版才是对搜索实际生效的数**；整小时那一版留着，
+是为了把"漂移被算成过离散"这件事本身量出来。
+
+**其它几条口径**：
+* **必须在对数空间算**。泊松尾在 k = 20、λ = 1e-4 时是 1e-94 量级，先算成
   浮点再相除会得到 inf/nan，而 nan 传进分位数看着像"算不出来"，其实是把最
-  极端那批悄悄丢掉了。
+  极端那批悄悄丢掉了。期望格数用 `logsumexp` 累加。
 * **报一条随 k 的曲线，不是一个点**；并且必须报"候选 `count` 分布中位处"
   那个 k（A 星是 9），那才是对目录实际生效的数。
 * **W 要标，而且要给对 W 的依赖**。A 星候选 `bin_size_best` 中位只有
   0.149 µs，与 B 星取的 10 µs 差两个数量级，两边的数不能直接比。
 * **不剔除候选窗**。候选本身就是这些簇——它们不是外来的信号，就是本底过离散
-  的那条尾巴，剔掉等于把要量的东西量掉。这几个小时按已发表率期望的真 TGF 数
-  是 1e-2 量级，整条流就是本底。为免这句被当成回避，同时给出"剔除候选窗
-  之后"的对照。
+  的那条尾巴，剔掉等于把要量的东西量掉。为免这句被当成回避，同时给出"剔除
+  候选窗之后"的对照。
+* **有一条结论完全不用 λ**：实测"≥8 的格数"随 W 怎么变。它不受本条任何口径
+  争议影响，对外首选它。
 
 用法: python3 ga_occupancy.py <YYYY-MM-DD> <signals.json> <输出前缀>
 """
@@ -30,6 +41,7 @@ import json
 import sys
 
 import numpy as np
+from scipy.special import logsumexp
 from scipy.stats import poisson
 
 ROOT = "/gecamfs/Archived-DATA/GSDC/LEVEL1/daily"
@@ -39,6 +51,7 @@ LN10 = np.log(10.0)
 WIDTHS_US = [0.0298, 0.149, 0.5, 1.0, 10.0, 100.0, 1000.0]
 KS = list(range(2, 21))
 K_MEDIAN = 9          # A 星候选 count 的中位
+SEG = 10.0            # 逐段 λ 的段长，秒。与 gecamB 的安静段取同一个值才能跨星比
 
 
 def met_exact(iso):
@@ -78,8 +91,8 @@ def load_hour(path):
     times = []
     with fits.open(path, memmap=True) as hdus:
         gti = hdus["GTI"].data
-        lo = np.asarray(gti["START"], float)
-        hi = np.asarray(gti["STOP"], float)
+        lo = np.array(gti["START"], float)
+        hi = np.array(gti["STOP"], float)
         for hdu in hdus:
             if not hdu.name.startswith("EVENTS"):
                 continue
@@ -106,44 +119,76 @@ def load_hour(path):
         return None
     time = np.concatenate(times)
     time.sort()
-    live = float(np.sum(np.clip(hi - lo, 0.0, None)))
-    return time, live
+    return time, lo, hi
 
 
-def occupancy(rel, w, ncells, drop_cells=None):
+def live_before(x, lo, hi):
+    """[起点, x] 落在 GTI 里的秒数。段数只有个位数，逐段累加即可。"""
+    tot = np.zeros_like(x)
+    for a, b in zip(lo, hi):
+        tot += np.clip(np.minimum(b, x) - a, 0.0, b - a)
+    return tot
+
+
+def segment_rates(rel, lo, hi):
+    """把这一小时切成 SEG 秒的段，给出逐段活时间与事例数。"""
+    edges = np.arange(0.0, float(rel[-1]) + SEG, SEG)
+    seg_live = np.diff(live_before(edges, lo, hi))
+    idx = np.floor(rel / SEG).astype(np.int64)
+    seg_n = np.bincount(idx, minlength=seg_live.size)[:seg_live.size].astype(float)
+    ok = seg_live > 0.5              # 半秒以下的边角段不参加
+    return seg_live[ok], seg_n[ok]
+
+
+def expected_log10(w, seg_live, seg_n):
+    """逐段泊松期望的 ">=k 格数"，对数空间累加。返回 log10 的数组，对齐 KS。"""
+    m = seg_live / w
+    lam = seg_n / m
+    logm = np.log(m)
+    out = np.empty(len(KS))
+    for i, k in enumerate(KS):
+        out[i] = logsumexp(logm + poisson.logsf(k - 1, lam)) / LN10
+    return out, float(seg_n.sum() / m.sum())
+
+
+def occupancy(rel, w, drop_cells=None):
     """宽度 w 的格子里的占据数分布。
 
-    只有非空格会出现在 np.unique 里；空格数 = ncells − 非空格数，对 k >= 2 的
-    尾巴没有影响，所以不必把它们造出来（W = 0.0298 µs 时 ncells 是 1.2e11，
-    造出来会直接撑爆内存）。
+    只有非空格会出现在 np.unique 里；空格数对 k >= 2 的尾巴没有影响，所以不必
+    把它们造出来（W = 0.0298 µs 时格数是 1e11，造出来会直接撑爆内存）。
     """
     cid = np.floor(rel / w).astype(np.int64)
     uid, cnt = np.unique(cid, return_counts=True)
+    ndrop = 0
     if drop_cells is not None and drop_cells.size:
         keep = ~np.isin(uid, drop_cells)
+        ndrop = int((~keep).sum())
         uid, cnt = uid[keep], cnt[keep]
-        ncells = ncells - float(drop_cells.size)
-    return np.bincount(cnt), ncells, int(cnt.sum())
+    return np.bincount(cnt), int(cnt.sum()), ndrop
 
 
-def report(tag, occ, ncells, n_ev, w, quiet=False):
-    lam = n_ev / ncells
-    tail = np.array([occ[k:].sum() if k < occ.size else 0 for k in KS], float)
-    # 对数空间：泊松尾在 k=12 时是 1e-60 量级，先化成浮点再除会得到 inf/nan
-    log_obs = np.where(tail > 0, np.log10(np.maximum(tail, 1.0)) - np.log10(ncells), np.nan)
-    log_poi = poisson.logsf(np.array(KS) - 1, lam) / LN10
-    rl = log_obs - log_poi
-    print(f"\n[{tag}] W = {w*1e6:g} µs  格数 {ncells:.3e}  事例 {n_ev:,}  λ = {lam:.4g}")
-    if not quiet:
-        print(f"{'k':>4} {'实测>=k的格数':>14} {'实测尾概率':>12} {'泊松尾概率':>12} {'实测/泊松':>13}")
-        for i, k in enumerate(KS):
-            if tail[i] <= 0:
-                print(f"{k:4d} {0:14d} {'0':>12} {10.0**log_poi[i]:12.3e} {'— 实测已空':>13}")
-                continue
-            mark = "   <- 候选 count 中位" if k == K_MEDIAN else ""
-            print(f"{k:4d} {int(tail[i]):14d} {10.0**log_obs[i]:12.3e} "
-                  f"{10.0**log_poi[i]:12.3e} {10.0**rl[i]:13.3e}{mark}")
-    return rl, lam
+def report(tag, occ, n_ev, w, live, seg_live, seg_n):
+    obs = np.array([occ[k:].sum() if k < occ.size else 0 for k in KS], float)
+    log_obs = np.where(obs > 0, np.log10(np.maximum(obs, 1.0)), np.nan)
+    # 整小时一个 λ
+    log_exp_g, lam_g = expected_log10(w, np.array([live]), np.array([float(n_ev)]))
+    # 逐段 λ
+    log_exp_s, lam_mean = expected_log10(w, seg_live, seg_n)
+    print(f"\n[{tag}] W = {w * 1e6:g} µs  活时间 {live:.0f} s  事例 {n_ev:,}  "
+          f"λ(整小时) = {lam_g:.4g}  段数 {seg_live.size}")
+    print(f"{'k':>4} {'实测>=k格数':>12} {'期望(整小时λ)':>14} {'期望(逐段λ)':>13} "
+          f"{'比(整小时)':>12} {'比(逐段)':>12} {'两者之比':>9}")
+    for i, k in enumerate(KS):
+        if obs[i] <= 0:
+            print(f"{k:4d} {0:12d} {10.0 ** log_exp_g[i]:14.3e} {10.0 ** log_exp_s[i]:13.3e} "
+                  f"{'— 实测已空':>12} {'':>12} {'':>9}")
+            continue
+        rg = 10.0 ** (log_obs[i] - log_exp_g[i])
+        rs = 10.0 ** (log_obs[i] - log_exp_s[i])
+        mark = "  <- 候选 count 中位" if k == K_MEDIAN else ""
+        print(f"{k:4d} {int(obs[i]):12d} {10.0 ** log_exp_g[i]:14.3e} {10.0 ** log_exp_s[i]:13.3e} "
+              f"{rg:12.3e} {rs:12.3e} {10.0 ** (log_exp_s[i] - log_exp_g[i]):9.2f}{mark}")
+    return (log_obs - log_exp_g), (log_obs - log_exp_s), obs
 
 
 def main():
@@ -153,26 +198,45 @@ def main():
     for s in signals:
         by_hour.setdefault(s["start"][11:13], []).append(s)
 
-    out = {"day": day, "k_list": KS, "widths_us": WIDTHS_US, "hours": {}}
+    out = {"day": day, "k_list": KS, "widths_us": WIDTHS_US, "seg_seconds": SEG, "hours": {}}
     for path in hour_files(day):
         hh = path.rsplit("_", 2)[-2]
         res = load_hour(path)
         if res is None:
             continue
-        time, live = res
+        time, glo, ghi = res
         t0 = float(time[0])
-        rel = time - t0            # 同一 ulp 格上的差，精确
-        print(f"\n{'=' * 78}\n小时 {hh}：事例 {time.size:,}  活时间 {live:.0f} s  "
-              f"率 {time.size / live:.0f} c/s\n{'=' * 78}", flush=True)
-        hrec = {}
+        rel = time - t0
+        lo, hi = glo - t0, ghi - t0
+        live = float(np.sum(np.clip(hi - lo, 0.0, None)))
+        seg_live, seg_n = segment_rates(rel, lo, hi)
+        rate = seg_n / seg_live
+        print(f"\n{'=' * 96}\n小时 {hh}：事例 {time.size:,}  活时间 {live:.0f} s  "
+              f"整小时率 {time.size / live:.0f} c/s\n"
+              f"  逐 {SEG:.0f} s 段的率：n={seg_live.size}  "
+              f"p5/p50/p95 = {np.percentile(rate, 5):.0f} / {np.percentile(rate, 50):.0f} / "
+              f"{np.percentile(rate, 95):.0f} c/s  最大/最小 = {rate.max() / rate.min():.2f}\n"
+              f"{'=' * 96}", flush=True)
+        # 把逐段率存下来：漂移污染的倍数应当等于 <λ_s^k>/<λ_s>^k（小 λ 极限下
+        # P(X>=k) ~ λ^k/k!，W 在分子分母里同次幂约掉），存了才能验而不是断言。
+        hrec = {"seg_live": seg_live.tolist(), "seg_n": seg_n.tolist(),
+                "rate_seg": {"p5": float(np.percentile(rate, 5)),
+                             "p50": float(np.percentile(rate, 50)),
+                             "p95": float(np.percentile(rate, 95)),
+                             "max_over_min": float(rate.max() / rate.min()),
+                             "n_seg": int(seg_live.size)}}
         for w_us in WIDTHS_US:
             w = w_us * 1e-6
-            occ, nc, n_ev = occupancy(rel, w, live / w)
-            rl, lam = report(f"{hh} 全段", occ, nc, n_ev, w)
-            hrec[str(w_us)] = {"lambda": lam, "n_ev": n_ev, "ncells": nc,
-                               "log10_ratio": {str(k): (None if not np.isfinite(rl[i]) else float(rl[i]))
-                                               for i, k in enumerate(KS)}}
-        # 对照：把候选最佳格覆盖到的格子整格剔掉
+            occ, n_ev, _ = occupancy(rel, w)
+            lg, ls, obs = report(f"{hh} 全段", occ, n_ev, w, live, seg_live, seg_n)
+            hrec[str(w_us)] = {
+                "n_ev": n_ev,
+                "obs_tail": {str(k): int(obs[i]) for i, k in enumerate(KS)},
+                "log10_ratio_global": {str(k): (None if not np.isfinite(lg[i]) else float(lg[i]))
+                                       for i, k in enumerate(KS)},
+                "log10_ratio_seg": {str(k): (None if not np.isfinite(ls[i]) else float(ls[i]))
+                                    for i, k in enumerate(KS)},
+            }
         sig = by_hour.get(hh, [])
         if sig:
             c0 = np.array([met_exact(s["start"]) + s["delay"] - t0 for s in sig])
@@ -180,8 +244,8 @@ def main():
             for w_us in (0.149, 10.0):
                 w = w_us * 1e-6
                 cells = np.unique(np.concatenate([np.floor(c0 / w), np.floor(c1 / w)])).astype(np.int64)
-                occ, nc, n_ev = occupancy(rel, w, live / w, drop_cells=cells)
-                report(f"{hh} 剔除候选窗（{cells.size} 格）", occ, nc, n_ev, w)
+                occ, n_ev, nd = occupancy(rel, w, drop_cells=cells)
+                report(f"{hh} 剔除候选窗（剔 {nd} 格）", occ, n_ev, w, live, seg_live, seg_n)
         out["hours"][hh] = hrec
         del time, rel
 
