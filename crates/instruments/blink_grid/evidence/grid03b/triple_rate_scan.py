@@ -30,8 +30,10 @@ c/s）：r₃ 平在 1.0–2.0 个/s、事例占比 8×10⁻⁴–1.7×10⁻²�
 用法（农场 N 分片）：
     python3 triple_rate_scan.py <chunk> <nchunk> <outdir> [--sat GRID-03B] [--seg 10]
 产物：
-    <outdir>/trip_NN.csv    逐过境一行
-    <outdir>/mlat_NN.csv    |磁纬| 分箱的累计账
+    <outdir>/trip_NN.csv     逐过境一行
+    <outdir>/mlat_NN.csv     |磁纬| 分箱的累计账（跨全部过境）
+    <outdir>/mlatdet_NN.csv  **逐过境 × 逐磁纬格**的明细——有了它，事后扣掉某批过境
+                             （如脉冲过境）或按速率分档重出磁纬曲线都不必重跑
 """
 
 import argparse
@@ -51,6 +53,13 @@ POLE_LAT, POLE_LON = np.radians(80.7), np.radians(-72.7)
 MLAT_EDGES = np.arange(0, 92, 2.0)
 # io/posatt.rs::MAX_SAMPLE_GAP_SECONDS
 MAX_GAP_S = 30.0
+# 位置坏行的物理半径带（见 load_posatt）。**四颗星全是太阳同步轨道**（实测倾角 97.3–97.6°，
+# 02 = 97.366°；先前流传的「02 倾角约 55°、非 SSO」已证伪），高度约 500 km；
+# 硬带取整个 LEO，窄带再按本文件高度中位数收。
+ALT_BAND_KM = (150.0, 1500.0)
+ALT_SPREAD_KM = 100.0
+# 分块转时戳格的块大小（见下），只为省临时数组，不影响结果
+TICK_CHUNK = 8_000_000
 
 
 def dipole_lat(lat_deg, lon_deg):
@@ -82,7 +91,16 @@ def blacklisted(sat, day):
 
 
 def load_posatt(sat, ymd, span):
-    """位姿里有位置解的行：(met, |偶极磁纬|)；一行都没有返回 None。"""
+    """位姿里有位置解**且地心距落在本星轨道窄带内**的行：(met, |偶极磁纬|)。
+
+    只筛 NaN 不够。全队实测：POSATT 里有 `X = Y = Z = 0` 一类的坏行，一天 1565 行；
+    **按 `|r|` 非零过滤仍放过 36 行**（地心距 1362–9060 km），造出 |磁纬| 87° 的假点。
+    判据要用**物理半径带**——地心距必须落在该星轨道的窄带内。天格是太阳同步、倾角
+    97–98°，"纬度超过倾角"这条自检不灵敏（极区本来就到得了），只能看高度。
+
+    两层：先夹死物理上不可能的（LEO 硬带），再按本文件高度中位数 ±100 km 掐掉离群行
+    （圆轨道，一次过境内高度变化只有几十 km）。
+    """
     hits = sorted(glob.glob(ARCH.format(sat=sat) + "/fits8/%s/posatt_*/*%s*" % (ymd, span)))
     if not hits:
         return None
@@ -91,9 +109,16 @@ def load_posatt(sat, ymd, span):
         t = np.asarray(d["TIME"], dtype=np.float64)
         lat = np.asarray(d["Latitude"], dtype=np.float64)
         lon = np.asarray(d["Longitude"], dtype=np.float64)
+        alt_km = np.asarray(d["Altitude"], dtype=np.float64) / 1000.0
     except Exception:
         return None
-    ok = np.isfinite(t) & np.isfinite(lat) & np.isfinite(lon)
+    ok = (np.isfinite(t) & np.isfinite(lat) & np.isfinite(lon) & np.isfinite(alt_km)
+          & (alt_km >= ALT_BAND_KM[0]) & (alt_km <= ALT_BAND_KM[1])
+          & (np.abs(lat) <= 90.0) & (np.abs(lon) <= 360.0))
+    if ok.sum() < 2:
+        return None
+    med = np.median(alt_km[ok])
+    ok &= np.abs(alt_km - med) <= ALT_SPREAD_KM
     if ok.sum() < 2:
         return None
     return t[ok], np.abs(dipole_lat(lat[ok], lon[ok]))
@@ -150,7 +175,9 @@ def main():
     args = ap.parse_args()
     os.makedirs(args.outdir, exist_ok=True)
 
-    days = sorted(glob.glob(ARCH.format(sat=args.sat) + "/fits7/*/*/*"))[args.chunk::args.nchunk]
+    all_days = sorted(glob.glob(ARCH.format(sat=args.sat) + "/fits7/*/*/*"))
+    days = all_days[args.chunk::args.nchunk]
+    n_days = n_passes = 0
     nb = len(MLAT_EDGES) - 1
     acc_ev = np.zeros(nb)
     acc_in3 = np.zeros(nb)
@@ -158,6 +185,11 @@ def main():
     acc_s = np.zeros(nb)
     no_pos_s = 0.0
 
+    # 逐过境 × 逐磁纬格的明细。**把汇总做成可逆的**：有了它，事后要扣掉某批过境
+    # （如脉冲过境）或按速率分档重出磁纬曲线，都不必重跑——先前的 mlat_NN.csv 是
+    # 跨全部过境累加死的，一旦发现 5% 的脉冲过境主导了曲线就只能重跑。
+    bh = open(os.path.join(args.outdir, "mlatdet_%02d.csv" % args.chunk), "w")
+    bh.write("pass_file,mlat_lo,seconds,n_events,n_in3,n_clusters\n")
     fh = open(os.path.join(args.outdir, "trip_%02d.csv" % args.chunk), "w")
     fh.write("sat,day,version,pass_file,gti_start,gti_stop,dur_s,n_kept,rate_cps,"
              "k3,k4,r3_per_s,frac_ev_in3,max_mult,"
@@ -170,36 +202,53 @@ def main():
         if not vers:
             continue
         ver = os.path.basename(vers[-1])
+        n_days += 1
         for path in sorted(glob.glob(vers[-1] + "/*.fits")):
+            n_passes += 1
             base = os.path.basename(path)
             try:
-                with fits.open(path, memmap=False) as hd:
+                with fits.open(path, memmap=True) as hd:
                     g = hd["GTI"].data
                     gs = float(np.asarray(g["START"])[0])
                     ge = float(np.asarray(g["STOP"])[0])
                     emin = np.asarray(hd["EBOUNDS"].data["E_MIN"], dtype=np.float64)
                     nch = emin.size
+                    # E_MIN 随道号单调（97 道对数分布），所以"沉积 ≥ 30 keV"等价于
+                    # "道号 ≥ ch_lo"。这样就不必为整列事例造一个 float64 的能量数组
+                    # ——一个过境上亿个事例，那一个数组就是几百 MB。先断言单调性。
+                    if np.any(np.diff(emin) <= 0):
+                        raise ValueError("E_MIN 非单调，道号下界这条捷径不成立")
+                    above = np.flatnonzero(emin >= ETH)
+                    ch_lo = int(above[0]) + 1 if above.size else nch  # PI 从 1 起
                     T = []
                     for i in range(4):
                         d = hd["EVENTS%d" % i].data
-                        t = np.asarray(d["TIME"], dtype=np.float64)
-                        pi = np.asarray(d["PI"], dtype=np.int32)
-                        ty = np.asarray(d["EVT_TYPE"], dtype=np.int32)
-                        ok = (pi >= 1) & (pi < nch)
-                        e = np.zeros(t.size)
-                        e[ok] = emin[pi[ok] - 1]
-                        T.append(t[(ty == 1) & ok & (e >= ETH)])
+                        pi = np.asarray(d["PI"])
+                        ty = np.asarray(d["EVT_TYPE"])
+                        keep = (ty == 1) & (pi >= ch_lo) & (pi < nch)
+                        del pi, ty
+                        T.append(np.asarray(d["TIME"], dtype=np.float64)[keep])
+                        del keep, d
             except Exception as ex:
                 fh.write("%s,%s,%s,%s,,,,,,,,,,,,,,,,ERR %s\n"
                          % (args.sat, day, ver, base, str(ex)[:60].replace(",", ";")))
                 continue
-            t = np.sort(np.concatenate(T))
+            # 一次过境到 1e8 个事例，临时数组就是几百 MB 一个。concatenate 之后立刻
+            # 放掉逐探头的那四个、原地排序（np.sort 会再复制一份）。
+            t = np.concatenate(T)
+            del T
+            t.sort()
             dur = max(ge - gs, 1e-9)
             if t.size < 100:
                 fh.write("%s,%s,%s,%s,%.3f,%.3f,%.1f,%d,,,,,,,,,,,,too few events\n"
                          % (args.sat, day, ver, base, gs, ge, dur, t.size))
                 continue
-            tk = np.rint(t * TICK).astype(np.int64)
+            # 分块转时戳格：`np.rint(t * TICK).astype(np.int64)` 会先造一个和 t 一样大的
+            # float64 临时数组，再造一个 int64，1e8 个事例就是多占 1.6 GB。
+            tk = np.empty(t.size, dtype=np.int64)
+            for a in range(0, t.size, TICK_CHUNK):
+                b = min(a + TICK_CHUNK, t.size)
+                tk[a:b] = np.rint(t[a:b] * TICK)
             _, sz = cluster_arrays(tk)
             big = sz >= TRIPLE
             k3 = int(big.sum())
@@ -214,16 +263,23 @@ def main():
             mlo = mhi = mbest = float("nan")
             best_frac = -1.0
             pos_s = 0.0
+            loc = {}
             edges = np.arange(gs, ge + args.seg, args.seg)
+            # t 已排序 ⇒ 用 searchsorted 定段边界。先前对每一段都做整数组布尔掩码，
+            # 那是 O(段数 × 事例数)：一次 2 小时的过境 720 段 × 1e8 个事例，跑不完。
+            lo_arr = edges[:-1]
+            hi_arr = np.minimum(edges[1:], ge)
+            b0 = np.searchsorted(t, lo_arr, side="left")
+            b1 = np.searchsorted(t, hi_arr, side="left")   # 与 (t >= lo) & (t < hi) 逐个等价
             for i in range(len(edges) - 1):
-                lo, hi = edges[i], min(edges[i + 1], ge)
+                lo, hi = lo_arr[i], hi_arr[i]
                 if hi <= lo:
                     continue
-                m = (t >= lo) & (t < hi)
-                nev = int(m.sum())
-                if nev == 0:
+                a0, a1 = int(b0[i]), int(b1[i])
+                nev = a1 - a0
+                if nev <= 0:
                     continue
-                _, szx = cluster_arrays(tk[m])
+                _, szx = cluster_arrays(tk[a0:a1])
                 bx = szx >= TRIPLE
                 ml = mlat_at(pos, 0.5 * (lo + hi)) if pos is not None else float("nan")
                 if not np.isfinite(ml):
@@ -235,6 +291,11 @@ def main():
                 acc_k3[b] += int(bx.sum())
                 acc_s[b] += hi - lo
                 pos_s += hi - lo
+                v = loc.setdefault(b, [0.0, 0, 0, 0])
+                v[0] += hi - lo
+                v[1] += nev
+                v[2] += int(szx[bx].sum())
+                v[3] += int(bx.sum())
                 mlo = ml if not np.isfinite(mlo) else min(mlo, ml)
                 mhi = ml if not np.isfinite(mhi) else max(mhi, ml)
                 f = int(szx[bx].sum()) / nev
@@ -244,12 +305,19 @@ def main():
             def fmt(v):
                 return "%.2f" % v if np.isfinite(v) else ""
 
+            for b in sorted(loc):
+                v = loc[b]
+                bh.write("%s,%.0f,%.1f,%d,%d,%d\n"
+                         % (base, MLAT_EDGES[b], v[0], v[1], v[2], v[3]))
+
             fh.write("%s,%s,%s,%s,%.3f,%.3f,%.1f,%d,%.1f,%d,%d,%.4f,%.6f,%d,%s,%s,%s,%s,%.1f,\n"
                      % (args.sat, day, ver, base, gs, ge, dur, t.size, t.size / dur,
                         k3, k4, k3 / dur, frac, int(sz.max()),
                         fmt(mlo), fmt(mhi), fmt(mbest), src, pos_s))
             fh.flush()
+            bh.flush()
     fh.close()
+    bh.close()
 
     with open(os.path.join(args.outdir, "mlat_%02d.csv" % args.chunk), "w") as mf:
         mf.write("mlat_lo,mlat_hi,seconds,n_events,n_in3,n_clusters\n")
@@ -260,7 +328,14 @@ def main():
                      % (MLAT_EDGES[i], MLAT_EDGES[i + 1], acc_s[i],
                         int(acc_ev[i]), int(acc_in3[i]), int(acc_k3[i])))
         mf.write("# no_position_seconds,%.1f\n" % no_pos_s)
-    print("chunk %d done" % args.chunk)
+
+    # 完成标记：worker 跑完才写。汇总入口要硬断言 Σdays_done == days_expected，
+    # 不能等非零退出——"队列空 ≠ 跑完"，残缺输入上跑完整条链不会报错。
+    with open(os.path.join(args.outdir, "done_%02d.txt" % args.chunk), "w") as df:
+        df.write("sat,%s\nchunk,%d\nnchunk,%d\n"
+                 "days_expected,%d\ndays_done,%d\npasses,%d\nno_position_seconds,%.1f\n"
+                 % (args.sat, args.chunk, args.nchunk, len(days), n_days, n_passes, no_pos_s))
+    print("chunk %d done: %d/%d days, %d passes" % (args.chunk, n_days, len(days), n_passes))
 
 
 if __name__ == "__main__":
