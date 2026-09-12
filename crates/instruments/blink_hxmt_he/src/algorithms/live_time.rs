@@ -336,3 +336,95 @@ mod tests {
         assert_eq!(gti, vec![[0.0, 20.0]], "速率变化不是缺口：{gti:?}");
     }
 }
+
+/// 在真数据上量一小时的 GTI，用来回答"判据在真实事例流上切出多少段"。
+///
+/// 这是 2026-09-12 那次验收失败留下的诊断口子：GTI 修复在 2023-11-07 上把候选
+/// 从 437 砍到 69（87%），而预估只有 0.6%。本地唯一一个有 1K 的小时
+/// （2020-04-15T08）实测**只切出 2 段、内部缺口 21 ms**，复现不出来，所以
+/// 根因只能在集群上对那一天量。
+///
+/// 默认不跑（要 1K 归档）。跑法：
+///
+/// ```text
+/// HXMT_1K_DIR=<归档根> BLINK_GTI_EPOCHS=2023-11-07T00,2023-11-07T13 \
+///   cargo test -p blink_hxmt_he --lib -- --ignored --nocapture gti_on_real_data
+/// ```
+///
+/// 不给 `BLINK_GTI_EPOCHS` 就跑内置的几个小时。**段数远多于个位数就是根因所在**，
+/// 那时看"段长 最短/中位"——若中位是毫秒量级，说明判据在那一天的流上过切。
+#[cfg(test)]
+mod real_data {
+    use super::*;
+    use crate::io::level_1k::EventFile;
+    use chrono::prelude::*;
+
+    #[test]
+    #[ignore = "需要 1K 归档"]
+    fn gti_on_real_data() {
+        let epochs: Vec<DateTime<Utc>> = match std::env::var("BLINK_GTI_EPOCHS") {
+            Ok(list) => list
+                .split(',')
+                .filter_map(|s| {
+                    NaiveDateTime::parse_from_str(s.trim(), "%Y-%m-%dT%H")
+                        .ok()
+                        .map(|n| Utc.from_utc_datetime(&n))
+                })
+                .collect(),
+            Err(_) => [(2020, 4, 15, 8), (2020, 4, 28, 8), (2022, 10, 9, 19)]
+                .iter()
+                .map(|&(y, m, d, h)| Utc.with_ymd_and_hms(y, m, d, h, 0, 0).unwrap())
+                .collect(),
+        };
+        for epoch in epochs {
+            let (y, m, d, h) = (epoch.year(), epoch.month(), epoch.day(), epoch.hour());
+            let file = match EventFile::from_epoch(&epoch) {
+                Ok(f) => f,
+                Err(e) => {
+                    println!("{y}-{m:02}-{d:02}T{h:02} 读不到：{e}");
+                    continue;
+                }
+            };
+            let events: Vec<Event> = (&file)
+                .into_iter()
+                .filter(blink_core::traits::Event::keep)
+                .collect();
+            if events.is_empty() {
+                println!("{y}-{m:02}-{d:02}T{h:02} 准入后为空");
+                continue;
+            }
+            let t0 = events[0].time();
+            let times: Vec<f64> = events
+                .iter()
+                .map(|e| (e.time() - t0).get::<second>())
+                .collect();
+            let span_end = 3600.0f64.max(times[times.len() - 1]);
+            let sorted = times.windows(2).all(|w| w[0] <= w[1]);
+            let mut dt: Vec<f64> = times.windows(2).map(|w| w[1] - w[0]).collect();
+            dt.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let med = dt[dt.len() / 2];
+            let mean = dt.iter().sum::<f64>() / dt.len() as f64;
+            let gti = gti_from_times(&times, span_end, DEFAULT_FALSE_GAP_BUDGET);
+            let live: f64 = gti.iter().map(|s| s[1] - s[0]).sum();
+            println!(
+                "{y}-{m:02}-{d:02}T{h:02}  n={}  已排序={sorted}  间隔 中位={:.0}us 均值={:.0}us 比={:.3}  段数={}  活时间={:.1}/{:.1}s",
+                times.len(),
+                med * 1e6,
+                mean * 1e6,
+                med / mean,
+                gti.len(),
+                live,
+                span_end
+            );
+            let mut lens: Vec<f64> = gti.iter().map(|s| s[1] - s[0]).collect();
+            lens.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            println!(
+                "    段长 最短={:.5}s 中位={:.5}s 最长={:.1}s   最大间隔={:.3}s",
+                lens[0],
+                lens[lens.len() / 2],
+                lens[lens.len() - 1],
+                dt[dt.len() - 1]
+            );
+        }
+    }
+}
