@@ -366,9 +366,13 @@ mod real_data {
             Ok(list) => list
                 .split(',')
                 .filter_map(|s| {
-                    NaiveDateTime::parse_from_str(s.trim(), "%Y-%m-%dT%H")
-                        .ok()
-                        .map(|n| Utc.from_utc_datetime(&n))
+                    // `%H` 之后必须补满分秒，否则 chrono 解析不出 NaiveDateTime
+                    NaiveDateTime::parse_from_str(
+                        &format!("{}:00:00", s.trim()),
+                        "%Y-%m-%dT%H:%M:%S",
+                    )
+                    .ok()
+                    .map(|n| Utc.from_utc_datetime(&n))
                 })
                 .collect(),
             Err(_) => [(2020, 4, 15, 8), (2020, 4, 28, 8), (2022, 10, 9, 19)]
@@ -378,6 +382,7 @@ mod real_data {
         };
         for epoch in epochs {
             let (y, m, d, h) = (epoch.year(), epoch.month(), epoch.day(), epoch.hour());
+            let _ = h;
             let file = match EventFile::from_epoch(&epoch) {
                 Ok(f) => f,
                 Err(e) => {
@@ -393,12 +398,14 @@ mod real_data {
                 println!("{y}-{m:02}-{d:02}T{h:02} 准入后为空");
                 continue;
             }
-            let t0 = events[0].time();
+            // 用小时边界当原点，这样首尾的偏移就是"这份文件实际覆盖了这一小时的哪一段"
+            let t0 = MissionElapsedTime::<HxmtHe>::from(epoch);
             let times: Vec<f64> = events
                 .iter()
                 .map(|e| (e.time() - t0).get::<second>())
                 .collect();
-            let span_end = 3600.0f64.max(times[times.len() - 1]);
+            let span_end = 3600.0f64;
+            let (first, last) = (times[0], times[times.len() - 1]);
             let sorted = times.windows(2).all(|w| w[0] <= w[1]);
             let mut dt: Vec<f64> = times.windows(2).map(|w| w[1] - w[0]).collect();
             dt.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -407,8 +414,9 @@ mod real_data {
             let gti = gti_from_times(&times, span_end, DEFAULT_FALSE_GAP_BUDGET);
             let live: f64 = gti.iter().map(|s| s[1] - s[0]).sum();
             println!(
-                "{y}-{m:02}-{d:02}T{h:02}  n={}  已排序={sorted}  间隔 中位={:.0}us 均值={:.0}us 比={:.3}  段数={}  活时间={:.1}/{:.1}s",
+                "{y}-{m:02}-{d:02}T{h:02}  n={}  已排序={sorted}  覆盖=[{first:.1}, {last:.1}]s（{:.1}%）  间隔 中位={:.0}us 均值={:.0}us 比={:.3}  段数={}  活时间={:.1}/{:.1}s",
                 times.len(),
+                (last - first) / 36.0,
                 med * 1e6,
                 mean * 1e6,
                 med / mean,
@@ -416,6 +424,16 @@ mod real_data {
                 live,
                 span_end
             );
+            // 要对外部真值（1B 的 FIFO reset）就得有缺口的绝对时刻
+            if let Ok(path) = std::env::var("BLINK_GTI_GAPS_CSV") {
+                use std::io::Write as _;
+                let mut f = std::fs::File::create(&path).unwrap();
+                writeln!(f, "met_start,met_stop").unwrap();
+                for w in gti.windows(2) {
+                    writeln!(f, "{:.6},{:.6}", t0.met() + w[0][1], t0.met() + w[1][0]).unwrap();
+                }
+                println!("    缺口写入 {path}");
+            }
             let mut lens: Vec<f64> = gti.iter().map(|s| s[1] - s[0]).collect();
             lens.sort_by(|a, b| a.partial_cmp(b).unwrap());
             println!(
