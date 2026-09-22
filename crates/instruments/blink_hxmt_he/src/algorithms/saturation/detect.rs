@@ -42,21 +42,65 @@ struct PacketTimeSummary {
     tail_rate: Option<f64>,
 }
 
-/// 判为 FIFO reset 的空洞倍率：包间隔要超过局部基线的这么多倍才算。
+/// 稳定率估不出来时的回退倍率：`edge_rate × gap` 要超过它才算。
 ///
-/// # 已知盲区：持续斩波不会被检出
+/// 这是 `MIN_POISSON_EXPONENT` 的同一个测试，但除的是 16 事例的边缘率（σ≈26%
+/// 而不是 1.4%），所以门槛必须留得高得多。只在 `stable_event_rate` 返回
+/// `None`（率窗口里一个包都没有，通常是数据边缘）时走这条路。
 ///
-/// 这个判据是为**孤立的** reset 设计的。深饱和时探测器会进入逐机箱的连续
-/// 斩波：约 7 ms 填满 FIFO → 复位 → 约 14 ms 死区 → 再填，周期约 21 ms
-/// （2024-05-11 Gannon REP episode 实测：零段起点间隔中位 21.0 ms、范围
-/// 16-22 ms，n=97）。此时基线本身已被压得很短，14 ms 的复位空洞只有局部包
-/// 间隔的约 14 倍，够不到 100，整段斩波一个 reset 都不报。
+/// # 关于「持续斩波检不出」
 ///
-/// 后果：深饱和段的包络是真通量的下界（逐箱占空比约 1/3），该段候选的显著
-/// 性也不可靠（本底被死时间稀释）。对 TGF 计数无影响——风暴日在目录阶段就
-/// 被 train 判据摘除了；但 REP episode 的定量必须回 1B 做占空比改正。
-/// 诊断图见 `scripts/plot_gannon_fifo_chopping.py`。
+/// 这里原先写着：深饱和时探测器进入逐机箱连续斩波（约 7 ms 填满 FIFO → 复位
+/// → 约 14 ms 死区，周期约 21 ms；2024-05-11 Gannon REP episode 实测零段起点
+/// 间隔中位 21.0 ms、范围 16-22 ms，n=97），基线被压短后 14 ms 的空洞够不到
+/// 100 倍，「整段斩波一个 reset 都不报」。
+///
+/// **这句与实测不符，已删。** 2024-05-11T20（该 episode 所在小时）实跑：旧判据
+/// 报 26866 条，新判据 26871 条，洞长中位 18.47 ms，正落在那个 16-22 ms 的梳齿
+/// 上。斩波是报出来的。
+///
+/// 下游的后果不受影响，仍然成立：深饱和段的包络是真通量的下界（逐箱占空比
+/// 约 1/3），该段候选的显著性也不可靠（本底被死时间稀释）。对 TGF 计数无影响
+/// ——风暴日在目录阶段就被 train 判据摘除了；但 REP episode 的定量必须回 1B 做
+/// 占空比改正。诊断图见 `scripts/plot_gannon_fifo_chopping.py`。
 const GAP_FACTOR: f64 = 100.0;
+
+/// 泊松指数下限：`λ_stable × gap` 要超过它才算 FIFO 复位。
+///
+/// # 为什么 `GAP_FACTOR` 那个数读不出误报率
+///
+/// `gap > GAP_FACTOR / rate` 移项就是 `rate × gap > GAP_FACTOR`。如果 `rate`
+/// 是真实泊松率 λ，那 `rate × gap` 就是 **λT**——「这段时间一个事例都没来」的
+/// 泊松指数，概率 e^−λT，常量本身就有单位，能直接算出全任务冒出几个假空洞。
+///
+/// 但 `GAP_FACTOR` 除的是 `local_event_rate`，16 个事例估出来的 λ̂，相对标准差
+/// 1/√15 = 25.8%。λT 进的是指数，±26% 就是 e^±26 ≈ 10^±11 的误报率摆动。两个
+/// 方向都实测到了：向上涨落让噪声进来（名义降到 30 时 12 小时冒出 13 条 <5 ms
+/// 的洞，而真 λT=30 的算术预期是全任务 0.32 条，差七个数量级）；向下涨落把真洞
+/// 挡在外面（HEB211105190 的 11.87 ms 洞，λ̂T=47.5 不过，稳定 λT 是 61.8）。
+///
+/// # 30 是怎么定的
+///
+/// 改用 ±0.5 s 窗口的稳定 λ（σ≈1.4%）后，在 8 个整小时上分两群量：
+///
+/// | | n | 洞长中位 | 稳定 λT（p1 / 中位 / max） |
+/// |---|---|---|---|
+/// | 判据已接受的 | 1778 | 16.06 ms | 47.5 / 373.9 / 806.6 |
+/// | 只在名义阈降到 10 才冒出的 | 2836 | 1.50 ms | 0 / 6.4 / **16.1** |
+///
+/// 噪声上界 16.1、真值最低（非零）37.8，**16–38 之间是空的**，阈值落在空谷里。
+/// 自洽性：这 8 小时 ×3 箱 ×4000 evt/s ≈ 3.5e8 个间隔，纯泊松下最大 λT 的期望是
+/// ln(3.5e8) = 19.7，实测噪声最大 16.1——换成稳定 λ 之后尾巴确实是泊松的，
+/// 试验次数那套算术才可以用。
+///
+/// 全任务约 3.4e12 个间隔：λT=30 期望 0.32 条假空洞，λT=40 期望 1.4e-5。取 30
+/// 而不是 40，是因为两头的代价不对称——误报只多 ±1 s 掩模（实测曝光影响 0.3%），
+/// 漏检则是真数据缺口没被标出来。30 距噪声上界 1.9 倍、距最低真值 1.26 倍。
+const MIN_POISSON_EXPONENT: f64 = 30.0;
+
+/// 估计稳定率用的半窗（秒）。要长到把率估计的涨落压进百分之几（本底率下
+/// 1 s 约 5000 个事例，σ≈1.4%），又短到跟得上进出 SAA 那种真实的率变化。
+const STABLE_RATE_HALF_WINDOW: f64 = 0.5;
 
 /// FIFO Reset gap 的最大持续时间（秒）。超过此值的 gap 不认为是 FIFO 复位，
 /// 而是数据传输中断、SAA 等其他原因。正常 FIFO reset gap 在 8ms~100ms 量级。
@@ -82,7 +126,7 @@ const MCU_READ_RATE_FLOOR: f64 = 15000.0;
 ///
 /// # 阈值怎么定的
 ///
-/// 12 个整小时上扫（含 SAA 进出、断档小时、221009A、2024-05-11 斩波小时）：
+/// 12 个整小时上扫（含 SAA 进出、断档小时、221009A、2024-05-11T00 深饱和小时）：
 ///
 /// | 阈值 evt/s | 检出 | 相对旧判据 |
 /// |---|---|---|
@@ -150,15 +194,61 @@ fn local_event_rate(prev: &PacketTimeSummary, next: &PacketTimeSummary) -> Optio
     }
 }
 
+/// 空洞附近 ±`STABLE_RATE_HALF_WINDOW` 秒的稳定事例率 (events/s)。
+///
+/// 用包级计数求和除以**活时间**（窗口内各包时间覆盖之和），不是除以窗长——
+/// 窗口里若含别的空洞，除以窗长会把率压低、λT 跟着压低，那是漏检方向。
+///
+/// 这里用包级平均是对的：反对包级平均是因为要分辨毫秒尖峰（那是 FIFO 闸门的
+/// 活，见 `RATE_WINDOW_EVENTS`），而泊松零假设要的恰恰是长窗口的平均率。
+///
+/// `summaries` 必须已按 `min_met` 升序。窗口内没有任何包覆盖时返回 `None`，
+/// 由调用方回退到边缘率判据。
+fn stable_event_rate(summaries: &[PacketTimeSummary], center: f64) -> Option<f64> {
+    let (lo, hi) = (
+        center - STABLE_RATE_HALF_WINDOW,
+        center + STABLE_RATE_HALF_WINDOW,
+    );
+    // 包按 min_met 升序，第一个可能与窗口相交的包是 min_met < hi 的最后一段之前；
+    // 往前退到 max_met < lo 为止即可，中断段里单个包可能很长，所以退的时候看 max。
+    let first = summaries.partition_point(|s| s.min_met < lo);
+    let mut counts = 0.0;
+    let mut live = 0.0;
+    let mut i = first;
+    while i > 0 && summaries[i - 1].max_met >= lo {
+        i -= 1;
+    }
+    while i < summaries.len() && summaries[i].min_met <= hi {
+        let s = &summaries[i];
+        let span = s.max_met - s.min_met;
+        let ov = s.max_met.min(hi) - s.min_met.max(lo);
+        if ov > 0.0 {
+            live += ov;
+            counts += if span > 1e-9 {
+                s.n_events as f64 * ov / span
+            } else {
+                s.n_events as f64
+            };
+        }
+        i += 1;
+    }
+    (live > 1e-6).then_some(counts / live)
+}
+
 /// 检测整包丢失（FIFO reset）造成的饱和区间。
 ///
 /// 算法：
 /// 1. 对每个 CCSDS 包重建所有事件的 MET 时间，提取 (min_met, max_met, n_events)
 /// 2. 按 min_met 排序
 /// 3. 对每对相邻包：
-///    - rate = 空洞两侧各 `RATE_WINDOW_EVENTS` 个事例的率，取高者
-///    - 若 rate < LOCAL_RATE_FLOOR → 跳过（中断段那类低速率长洞）
-///    - 若 gap > GAP_FACTOR / rate → 标记为 FifoReset
+///    - edge_rate = 空洞两侧各 `RATE_WINDOW_EVENTS` 个事例的率，取高者（瞬时）
+///    - 若 edge_rate < LOCAL_RATE_FLOOR → 跳过（中断段那类低速率长洞）
+///    - 泊松否决用 ±`STABLE_RATE_HALF_WINDOW` 秒的稳定率：
+///      `stable_rate × gap > MIN_POISSON_EXPONENT` → 标记为 FifoReset；
+///      稳定率估不出来时回退到 `edge_rate × gap > GAP_FACTOR`
+///
+/// 两个测试要用两个不同的 λ：FIFO 那一问要毫秒尺度的瞬时率，泊松那一问要
+/// 稳定的本底率。共用一个估计量是原判据的病根，见 `MIN_POISSON_EXPONENT`。
 pub fn detect_fifo_reset_intervals(sci_data: &SciFile, offset: f64) -> Vec<SaturationInterval> {
     let packet_times = reconstruct_with_wrap_tracking(sci_data, offset);
 
@@ -190,15 +280,19 @@ pub fn detect_fifo_reset_intervals(sci_data: &SciFile, offset: f64) -> Vec<Satur
             continue;
         }
 
-        let rate = match local_event_rate(&window[0], &window[1]) {
+        let edge_rate = match local_event_rate(&window[0], &window[1]) {
             Some(r) => r,
             None => continue,
         };
-        if rate < LOCAL_RATE_FLOOR {
+        if edge_rate < LOCAL_RATE_FLOOR {
             continue;
         }
 
-        if gap > GAP_FACTOR / rate && gap <= MAX_FIFO_RESET_GAP {
+        let beats_poisson = match stable_event_rate(&summaries, window[0].max_met) {
+            Some(stable) => gap * stable > MIN_POISSON_EXPONENT,
+            None => gap * edge_rate > GAP_FACTOR,
+        };
+        if beats_poisson && gap <= MAX_FIFO_RESET_GAP {
             intervals.push(SaturationInterval {
                 start_met: window[0].max_met,
                 stop_met: window[1].min_met,
@@ -947,6 +1041,70 @@ mod rate_window_tests {
     #[test]
     fn zero_span_is_not_a_rate() {
         assert!(edge_event_rate(&[1.0; 20]).is_none());
+    }
+
+    /// 造一串包：每包 109 个事例，率 `rate`，从 `t0` 起连续铺，
+    /// `skip` 给出要挖掉的包序号（模拟空洞）。
+    fn packet_train(rate: f64, n_pkt: usize, t0: f64, skip: &[usize]) -> Vec<PacketTimeSummary> {
+        let span = 108.0 / rate;
+        (0..n_pkt)
+            .filter(|i| !skip.contains(i))
+            .map(|i| {
+                let a = t0 + i as f64 * 109.0 / rate;
+                summary(&even_stream(rate, 109, a))
+            })
+            .collect()
+    }
+
+    /// 均匀包流上，稳定率就是那个率。
+    #[test]
+    fn stable_rate_recovers_a_uniform_stream() {
+        let s = packet_train(4_000.0, 60, 0.0, &[]);
+        let center = s[30].max_met;
+        let r = stable_event_rate(&s, center).unwrap();
+        assert!((r - 4_000.0).abs() < 60.0, "stable rate {r}, expected 4000");
+    }
+
+    /// 窗口里有空洞时，率要按**活时间**算。除以窗长会把率压低、λT 跟着压低，
+    /// 那是漏检方向——这条守住那个除数。
+    #[test]
+    fn stable_rate_divides_by_live_time_not_wall_clock() {
+        // 抠掉窗口中间 6 个包，约占窗口的四分之一
+        let s = packet_train(4_000.0, 60, 0.0, &[31, 32, 33, 34, 35, 36]);
+        let center = s[30].max_met;
+        let r = stable_event_rate(&s, center).unwrap();
+        assert!(
+            (r - 4_000.0).abs() < 200.0,
+            "a hole inside the window must not drag the rate down, got {r}"
+        );
+    }
+
+    /// 窗口里一个包都没有时返回 None，由调用方回退到边缘率判据。
+    #[test]
+    fn stable_rate_is_none_when_the_window_is_empty() {
+        let s = packet_train(4_000.0, 4, 0.0, &[]);
+        assert!(stable_event_rate(&s, 1_000.0).is_none());
+    }
+
+    /// 判据的分工：泊松那一关吃稳定率，FIFO 闸门吃边缘率。
+    /// 数字取自 HEB211105190——洞 11.87 ms、稳定 λ 5203/s：λ̂T 不到 100 所以旧
+    /// 判据拒了它，稳定 λT 是 61.8，远在 30 之上。
+    #[test]
+    fn the_poisson_test_reads_the_stable_rate() {
+        let gap = 0.011_872;
+        let stable = 5_203.0;
+        let edge = 4_000.0; // 洞旁 16 个事例恰好偏稀，向下涨落
+        assert!(
+            gap * edge < GAP_FACTOR,
+            "the old test on the edge rate rejects this hole — that is the miss"
+        );
+        assert!(
+            gap * stable > MIN_POISSON_EXPONENT,
+            "the stable rate has to clear the Poisson bar: {} vs {MIN_POISSON_EXPONENT}",
+            gap * stable
+        );
+        // 噪声那一群的稳定 λT 实测最大 16.1，必须仍然拒
+        assert!(16.1 < MIN_POISSON_EXPONENT, "the junk population must stay out");
     }
 }
 
