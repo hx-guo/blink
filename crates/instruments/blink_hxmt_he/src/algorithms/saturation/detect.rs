@@ -387,6 +387,22 @@ pub fn reconstruct_gaps(
             vec![Vec::new(); n_sbins];
 
         // 汇总所有参考 box 的事件，统一构建形状函数
+        // k 只依赖 (gap, 参考盒)，与形状 bin 无关，整段 gap 算一次即可；
+        // 原来放在逐 bin 循环里，每个 gap 要重复调用 n_sbins 次（等价改写）。
+        let ks: Vec<f64> = references
+            .iter()
+            .map(|ref_data| {
+                calibrate_ratio_sorted(
+                    &target.events,
+                    &ref_data.events,
+                    &target.unreliable,
+                    &ref_data.unreliable,
+                    gap_start,
+                    gap_stop,
+                    0.5,
+                )
+            })
+            .collect();
         let mut has_ref = false;
         // M1:每格『可用(可信)参考盒数』——形状/权重/n_m 的正确分母。饱和(is_in_unreliable
         // 被排除)才不算可用;可信但该格 count=0 的盒仍算可用(0 计数入分子、+1 入分母)。
@@ -411,11 +427,7 @@ pub fn reconstruct_gaps(
                 let count = (hi_idx - lo_idx) as f64;
 
                 if count > 0.0 {
-                    let k = calibrate_ratio_sorted(
-                        &target.events, &ref_data.events,
-                        &target.unreliable, &ref_data.unreliable,
-                        gap_start, gap_stop, 0.5,
-                    );
+                    let k = ks[ref_idx];
                     total_ref_count += count * k;
                     bin_refs[si].push((ref_idx, lo_idx, hi_idx, k));
                 }
