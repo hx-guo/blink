@@ -398,8 +398,20 @@ pub fn detect_unreliable_intervals(
     intervals
 }
 
+/// `intervals` 由 `detect_unreliable_intervals` 按 `start` 排好，且同一盒内互不
+/// 重叠（每段取自相邻两包之间），所以二分与逐个扫等价。
+///
+/// 原来是线性 `any()`，逐事例、逐形状格各扫一遍全表。复位稀疏时无所谓，但
+/// 2024-09-18T20 那种一小时两万条复位的深饱和小时，每盒七八千段 × 上百万次查询
+/// 就成了实际意义上的 O(n²)：实测 707 段的小时 8.3 gap/s，7000 段的小时掉到
+/// 0.107 gap/s，慢 78 倍，整小时要跑几十小时。
 fn is_in_unreliable(t: f64, intervals: &[UnreliableInterval]) -> bool {
-    intervals.iter().any(|iv| t >= iv.start && t <= iv.stop)
+    debug_assert!(
+        intervals.windows(2).all(|w| w[0].start <= w[1].start && w[0].stop <= w[1].start),
+        "unreliable intervals must be sorted and disjoint for the binary search"
+    );
+    let i = intervals.partition_point(|iv| iv.stop < t);
+    i < intervals.len() && intervals[i].start <= t
 }
 
 /// 单个参考盒对某 cross-ref gap 的标定描述子(spec §13/§5b)。
