@@ -36,9 +36,10 @@ struct PacketTimeSummary {
     max_met: f64,
     /// 包内有效事件数
     n_events: usize,
-    /// 包内 `RATE_WINDOW_EVENTS` 事例滑窗的最大率 (events/s)，用于跟
-    /// `MCU_READ_RATE_FLOOR` 比较。见该常量的说明。
-    peak_rate: Option<f64>,
+    /// 包头 `RATE_WINDOW_EVENTS` 个事例的率 (events/s)
+    head_rate: Option<f64>,
+    /// 包尾 `RATE_WINDOW_EVENTS` 个事例的率 (events/s)
+    tail_rate: Option<f64>,
 }
 
 /// 判为 FIFO reset 的空洞倍率：包间隔要超过局部基线的这么多倍才算。
@@ -61,61 +62,92 @@ const GAP_FACTOR: f64 = 100.0;
 /// 而是数据传输中断、SAA 等其他原因。正常 FIFO reset gap 在 8ms~100ms 量级。
 const MAX_FIFO_RESET_GAP: f64 = 1.0;
 
-/// MCU 读取速率下限 (events/s)。
-/// MCU 以固定速率从 FIFO A 读取：109 events / ~7ms ≈ 15,600 evt/s。
-/// 只有当物理事件率超过此值时，FIFO 才可能溢出触发 FIFOAFullReset。
-/// 设为 15000 略低于理论值，留一点余量。
+/// MCU 从 FIFO A 读出的速率 (events/s)：109 events / ~7 ms ≈ 15,600，取 15000
+/// 留一点余量。**这是个物理常量**，`reconstruct_gaps` 在 gap 两端都估不出率时
+/// 拿它当形状函数的地板填充值。检测判据的闸门是另一回事，见 `LOCAL_RATE_FLOOR`
+/// ——两者数值曾经相同，但含义不同，不要再合成一个。
 const MCU_READ_RATE_FLOOR: f64 = 15000.0;
 
-/// 估计瞬时率用的滑窗事例数。
+/// 本地事例率下限 (events/s)：低于此值的空洞不判为 FIFO 复位。
+///
+/// **不是物理阈值**。MCU 从 FIFO A 读出的速率是 109 events / ~7 ms ≈ 15,600
+/// evt/s，只有入口率超过它 FIFO 才可能溢出，这条常量原先就取在那个数上。但
+/// 把它设成物理值是把两件事压在一个阈值上：泊松否决已经由 `GAP_FACTOR` 承担
+/// （100 倍平均间隔是 e^-100 的涨落，噪声根本够不到），闸门真正要挡的只是
+/// 中断段那类**低速率长洞**——SAA 关机、传输中断，那里的包横跨几秒到上百秒才
+/// 凑够 109 个事例，率只有 1–19 evt/s。
+///
+/// 而且记录下来的率是被审查过的下界：FIFO 一满就堵写，堵掉的事例恰恰不在数据
+/// 里。拿物理值去卡一个系统性偏低的观测量，只会漏检。
+///
+/// # 阈值怎么定的
+///
+/// 12 个整小时上扫（含 SAA 进出、断档小时、221009A、2024-05-11 斩波小时）：
+///
+/// | 阈值 evt/s | 检出 | 相对旧判据 |
+/// |---|---|---|
+/// | 500 / 1000 / 2000 / 3000 / 4000 / 6000 / 8000 | 27526（逐条相同） | +67, −0 |
+/// | 10000 | 27523 | 开始丢 |
+/// | 12000 | 27503 | −20 |
+/// | 15000 | 27109 | −406 |
+///
+/// 500 到 8000 跨一个多数量级结果一字不差——判据对它不敏感，取值落在空谷里。
+/// 15000 会丢 406 条，都在斩波段：洞旁那 16 个事例的率到不了 15 kHz，旧判据是靠
+/// ±5 包在几百毫秒外找到的尖峰才放行的。
+///
+/// 取 2000：比中断段包的 1–19 evt/s 高两个数量级，比低速率箱的约 400 evt/s 高
+/// 5 倍，又比平台上沿 8000 低 4 倍，两边都有余量。任何阈值下都没有出现整秒端点
+/// 的空洞，也没有 >50 ms 的。
+const LOCAL_RATE_FLOOR: f64 = 2000.0;
+
+/// 量本地率用的事例数。
 ///
 /// # 为什么不能用整包平均率
 ///
 /// 一个包裹 109 个事例，本底率（约 4000 evt/s）下横跨约 27 ms。撑满 FIFO 只
 /// 需要几毫秒的爆发，用 `n_events / span` 去量它，等于把毫秒级尖峰摊到整包
-/// 上，稀释约一个数量级。判据问的是「瞬时入口率有没有超过读出率」，量到的
-/// 却是「109 个事例的平均率」，两个量差一个数量级，却拿同一个阈值卡。
+/// 上，稀释约一个数量级。两道关卡原先量到的都是这个平均：闸门比的是
+/// `n_events / span`，`GAP_FACTOR` 的基线是它的倒数。于是一起漏检——洞长约等于
+/// 455/尖峰率，门槛约等于 100/包级率，要通过就得「包级率 ≥ 尖峰率的 22%」。
 ///
 /// 实测代价（HEB_list 832 个源窗，共 6.4 小时）：满足 `gap > 100×baseline`
-/// 且 `≤ 1 s` 的空洞里，14478 条通过闸门、25 条被整包平均率挡掉。被挡掉的
-/// 25 条全部落在 15.6–17.9 ms，与通过的那批同一段；>100 ms 和 <10 ms 都是
-/// 0 条——闸门没有挡住任何**另一类**东西，只是切掉了同一人群的低速率尾巴。
-///
-/// 改为滑窗后在 12 个整小时（含 SAA 进出、断档小时、221009A、2024-05-11
-/// 斩波小时）上对照：只增不减，+54 条、全部 15.1–18.8 ms，无一条长洞；
-/// 最安静那小时新增的 10 条，1K 事例流逐条复现、长度一致到 0.01 ms。
+/// 且 `≤ 1 s` 的空洞里，14478 条通过、25 条被整包平均挡掉。被挡掉的 25 条全部
+/// 落在 15.6–17.9 ms，与通过的那批同一段；>100 ms 和 <10 ms 都是 0 条——
+/// 挡掉的不是**另一类**东西，只是同一人群的低速率尾巴。
 ///
 /// 16 个事例在 15,600 evt/s 下横跨约 1 ms，足以分辨那种爆发；再小则率估计
-/// 本身的泊松涨落会把本底抬过阈值（闸门是放行向的，虚高只会放进误报）。
+/// 自身的泊松涨落会明显偏高。
 const RATE_WINDOW_EVENTS: usize = 16;
-/// 从单个包的时间跨度和事件数估算平均事件间隔 (秒/事件)。
-/// 如果包内时间跨度过小（<1μs）或事件数不足，返回 None。
-fn mean_event_interval(summary: &PacketTimeSummary) -> Option<f64> {
-    let span = summary.max_met - summary.min_met;
-    if span < 1e-6 || summary.n_events < 2 {
-        return None;
-    }
-    Some(span / summary.n_events as f64)
-}
-
-/// 包内 `RATE_WINDOW_EVENTS` 事例滑窗的最大率 (events/s)。
-/// `times` 必须升序。事例数不足一个滑窗时退化为整段（仍按间隔数估率）。
+/// 一段（包头或包尾）事例的率 (events/s)。`times` 必须升序。
 ///
 /// k 个事例张开 T 秒里有 k−1 个间隔，所以率取 (k−1)/T：泊松过程下
 /// E[T] = (k−1)/λ，用 k/T 会系统性高估 k/(k−1)。
-fn peak_event_rate(times: &[f64]) -> Option<f64> {
+fn edge_event_rate(times: &[f64]) -> Option<f64> {
     if times.len() < 2 {
         return None;
     }
-    let k = RATE_WINDOW_EVENTS.min(times.len());
-    let mut best: f64 = 0.0;
-    for w in times.windows(k) {
-        let span = w[k - 1] - w[0];
-        if span > 1e-9 {
-            best = best.max((k - 1) as f64 / span);
-        }
+    let span = times[times.len() - 1] - times[0];
+    (span > 1e-9).then(|| (times.len() - 1) as f64 / span)
+}
+
+/// 空洞处的本地事例率 (events/s)：洞前最后 `RATE_WINDOW_EVENTS` 个事例、
+/// 洞后最前 `RATE_WINDOW_EVENTS` 个事例，两者取高。
+///
+/// **只看洞旁边**。判据问的两件事——入口率够不够撑满 FIFO、这个洞比本地事例
+/// 间隔大多少倍——都只关于空洞紧邻的那一小段时间。原来的写法一是把率算成整包
+/// 109 个事例的平均，二是在 ±5 个包的范围里取最大（本底率下约 ±135 ms；中断段
+/// 里一个包能横跨 108 s，就是 ±几百秒）。拿几百毫秒外的尖峰去论证这个洞旁边
+/// FIFO 撑满了，站不住；实测也确实会把中断段起止落在整秒的空洞放进来。
+///
+/// ±5 包那个加宽是旧写法的遗留：一个包只给一个率，只能靠横向多取几个包压涨落。
+/// 换成事例级窗口后一个包里就有约 109 个测量，这个理由不成立了。
+fn local_event_rate(prev: &PacketTimeSummary, next: &PacketTimeSummary) -> Option<f64> {
+    match (prev.tail_rate, next.head_rate) {
+        (Some(a), Some(b)) => Some(a.max(b)),
+        (Some(a), None) => Some(a),
+        (None, Some(b)) => Some(b),
+        (None, None) => None,
     }
-    (best > 0.0).then_some(best)
 }
 
 /// 检测整包丢失（FIFO reset）造成的饱和区间。
@@ -124,11 +156,9 @@ fn peak_event_rate(times: &[f64]) -> Option<f64> {
 /// 1. 对每个 CCSDS 包重建所有事件的 MET 时间，提取 (min_met, max_met, n_events)
 /// 2. 按 min_met 排序
 /// 3. 对每对相邻包：
-///    - baseline = 紧邻两包中平均事件间隔较小的那个（事件率较高的包）
-///    - local_max_rate = ±5 包窗口内（包含紧邻 2 包，共最多 12 包）各包
-///      `RATE_WINDOW_EVENTS` 事例滑窗峰值率的最大者
-///    - 若 local_max_rate < MCU_READ_RATE_FLOOR → 跳过（源率不到饱和阈值）
-///    - 若 gap > baseline × GAP_FACTOR → 标记为 FifoReset
+///    - rate = 空洞两侧各 `RATE_WINDOW_EVENTS` 个事例的率，取高者
+///    - 若 rate < LOCAL_RATE_FLOOR → 跳过（中断段那类低速率长洞）
+///    - 若 gap > GAP_FACTOR / rate → 标记为 FifoReset
 pub fn detect_fifo_reset_intervals(sci_data: &SciFile, offset: f64) -> Vec<SaturationInterval> {
     let packet_times = reconstruct_with_wrap_tracking(sci_data, offset);
 
@@ -146,45 +176,29 @@ pub fn detect_fifo_reset_intervals(sci_data: &SciFile, offset: f64) -> Vec<Satur
             min_met,
             max_met,
             n_events: valid.len(),
-            peak_rate: peak_event_rate(&valid),
+            head_rate: edge_event_rate(&valid[..RATE_WINDOW_EVENTS.min(valid.len())]),
+            tail_rate: edge_event_rate(&valid[valid.len().saturating_sub(RATE_WINDOW_EVENTS)..]),
         });
     }
 
     summaries.sort_by(|a, b| a.min_met.partial_cmp(&b.min_met).unwrap());
 
     let mut intervals = Vec::new();
-    for (wi, window) in summaries.windows(2).enumerate() {
+    for window in summaries.windows(2) {
         let gap = window[1].min_met - window[0].max_met;
         if gap <= 0.0 {
             continue;
         }
 
-        let iv_prev = mean_event_interval(&window[0]);
-        let iv_next = mean_event_interval(&window[1]);
-        let baseline = match (iv_prev, iv_next) {
-            (Some(a), Some(b)) => a.min(b),
-            (Some(a), None) => a,
-            (None, Some(b)) => b,
-            (None, None) => continue,
+        let rate = match local_event_rate(&window[0], &window[1]) {
+            Some(r) => r,
+            None => continue,
         };
-
-        // 用 ±5 包窗口（含紧邻 2 包）的最大瞬时率作为本地源率估计：
-        // 单个滑窗有涨落，扩展到 12 包窗口取最大值更稳健。
-        let lo = wi.saturating_sub(5);
-        let hi = (wi + 6).min(summaries.len() - 1);
-        let mut local_max_rate = 0.0_f64;
-        let mut found = false;
-        for k in lo..=hi {
-            if let Some(r) = summaries[k].peak_rate {
-                local_max_rate = local_max_rate.max(r);
-                found = true;
-            }
-        }
-        if !found || local_max_rate < MCU_READ_RATE_FLOOR {
+        if rate < LOCAL_RATE_FLOOR {
             continue;
         }
 
-        if gap > baseline * GAP_FACTOR && gap <= MAX_FIFO_RESET_GAP {
+        if gap > GAP_FACTOR / rate && gap <= MAX_FIFO_RESET_GAP {
             intervals.push(SaturationInterval {
                 start_met: window[0].max_met,
                 stop_met: window[1].min_met,
@@ -857,54 +871,82 @@ mod rate_window_tests {
         (0..n).map(|i| t0 + i as f64 / rate).collect()
     }
 
-    /// 均匀流上，滑窗峰值率就是那个率——(k−1)/T 的取法不能带偏置。
+    fn summary(times: &[f64]) -> PacketTimeSummary {
+        PacketTimeSummary {
+            pkt_idx: 0,
+            min_met: times[0],
+            max_met: times[times.len() - 1],
+            n_events: times.len(),
+            head_rate: edge_event_rate(&times[..RATE_WINDOW_EVENTS.min(times.len())]),
+            tail_rate: edge_event_rate(&times[times.len().saturating_sub(RATE_WINDOW_EVENTS)..]),
+        }
+    }
+
+    /// 均匀流上，边缘窗率就是那个率——(k−1)/T 的取法不能带偏置。
     #[test]
     fn uniform_stream_gives_its_own_rate() {
         let t = even_stream(4_000.0, 109, 0.0);
-        let r = peak_event_rate(&t).unwrap();
-        assert!((r - 4_000.0).abs() < 1.0, "peak rate {r}, expected 4000");
+        let r = edge_event_rate(&t[..RATE_WINDOW_EVENTS]).unwrap();
+        assert!((r - 4_000.0).abs() < 1.0, "edge rate {r}, expected 4000");
     }
 
-    /// 这条是判据缺陷的回归测试。一个包裹 109 个事例：64 个是 4 kHz 本底，
-    /// 45 个是 1.5 ms 内的 30 kHz 爆发——照着 HEB 源窗里实测的洞前形态造的
-    /// （1 ms 分辨下峰值 23–35 kHz）。整包平均率约 6 kHz，够不到 15 kHz
-    /// 闸门；滑窗必须看见爆发，否则这类 FIFO reset 全部漏检。
+    /// 判据缺陷的回归测试。一个包裹 109 个事例：64 个是 4 kHz 本底，45 个是
+    /// 1.5 ms 内的 30 kHz 爆发，爆发压在包尾——照着 HEB 源窗里实测的洞前形态造的
+    /// （1 ms 分辨下峰值 23–35 kHz）。整包平均率约 6 kHz，两道关卡按包级平均都
+    /// 挡得住它；按洞旁边的事例算就挡不住。
     #[test]
-    fn short_spike_survives_packet_averaging() {
+    fn a_spike_at_the_edge_survives_packet_averaging() {
         let mut t = even_stream(4_000.0, 64, 0.0);
-        let t_spike = t[32];
+        let t0 = t[t.len() - 1];
         for i in 0..45 {
-            t.push(t_spike + (i as f64 + 1.0) / 30_000.0);
+            t.push(t0 + (i as f64 + 1.0) / 30_000.0);
+        }
+        let s = summary(&t);
+        let hole = 0.015;
+
+        let packet_average = (s.max_met - s.min_met) / s.n_events as f64;
+        assert!(
+            hole < packet_average * GAP_FACTOR,
+            "the packet average puts the bar at {} s, above the hole — that is the defect",
+            packet_average * GAP_FACTOR
+        );
+        let rate = local_event_rate(&s, &s).unwrap();
+        assert!(rate > 25_000.0, "the edge window has to see the spike, got {rate}");
+        assert!(hole > GAP_FACTOR / rate, "and the hole has to clear the bar it sets");
+    }
+
+    /// 只看洞旁边：同样的爆发挪到包中间，边缘窗就不该看见它。
+    /// 这是整包峰值写法放进中断段整秒空洞的那个毛病的单元版。
+    #[test]
+    fn a_spike_far_from_the_gap_is_not_local_rate() {
+        let mut t = even_stream(4_000.0, 64, 0.0);
+        let mid = t[32];
+        for i in 0..45 {
+            t.push(mid + (i as f64 + 1.0) / 30_000.0);
         }
         t.sort_by(|a, b| a.partial_cmp(b).unwrap());
-
-        let span = t[t.len() - 1] - t[0];
-        let packet_average = t.len() as f64 / span;
+        let rate = local_event_rate(&summary(&t), &summary(&t)).unwrap();
         assert!(
-            packet_average < MCU_READ_RATE_FLOOR,
-            "packet average {packet_average} should sit below the gate, that is the whole point"
-        );
-        assert!(
-            peak_event_rate(&t).unwrap() > MCU_READ_RATE_FLOOR,
-            "the sliding window has to see the spike the packet average hides"
+            rate < 10_000.0,
+            "a spike in the middle of the packet must not count as the rate at the gap, got {rate}"
         );
     }
 
-    /// 事例数不足一个滑窗时退化为整段，不能直接返回 None——
+    /// 事例数不足一个窗时退化为整段，不能直接返回 None——
     /// 包尾/包首的短包也要参与本地率估计。
     #[test]
     fn short_packet_degrades_to_whole_span() {
         let t = even_stream(20_000.0, 5, 0.0);
-        let r = peak_event_rate(&t).unwrap();
-        assert!((r - 20_000.0).abs() < 1.0, "peak rate {r}, expected 20000");
-        assert!(peak_event_rate(&t[..1]).is_none(), "one event has no rate");
-        assert!(peak_event_rate(&[]).is_none(), "no events, no rate");
+        let r = edge_event_rate(&t).unwrap();
+        assert!((r - 20_000.0).abs() < 1.0, "edge rate {r}, expected 20000");
+        assert!(edge_event_rate(&t[..1]).is_none(), "one event has no rate");
+        assert!(edge_event_rate(&[]).is_none(), "no events, no rate");
     }
 
     /// 所有事例同一时刻（重建退化）不能产生无穷大率。
     #[test]
     fn zero_span_is_not_a_rate() {
-        assert!(peak_event_rate(&[1.0; 20]).is_none());
+        assert!(edge_event_rate(&[1.0; 20]).is_none());
     }
 }
 
