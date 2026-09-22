@@ -36,6 +36,9 @@ struct PacketTimeSummary {
     max_met: f64,
     /// 包内有效事件数
     n_events: usize,
+    /// 包内 `RATE_WINDOW_EVENTS` 事例滑窗的最大率 (events/s)，用于跟
+    /// `MCU_READ_RATE_FLOOR` 比较。见该常量的说明。
+    peak_rate: Option<f64>,
 }
 
 /// 判为 FIFO reset 的空洞倍率：包间隔要超过局部基线的这么多倍才算。
@@ -64,6 +67,27 @@ const MAX_FIFO_RESET_GAP: f64 = 1.0;
 /// 设为 15000 略低于理论值，留一点余量。
 const MCU_READ_RATE_FLOOR: f64 = 15000.0;
 
+/// 估计瞬时率用的滑窗事例数。
+///
+/// # 为什么不能用整包平均率
+///
+/// 一个包裹 109 个事例，本底率（约 4000 evt/s）下横跨约 27 ms。撑满 FIFO 只
+/// 需要几毫秒的爆发，用 `n_events / span` 去量它，等于把毫秒级尖峰摊到整包
+/// 上，稀释约一个数量级。判据问的是「瞬时入口率有没有超过读出率」，量到的
+/// 却是「109 个事例的平均率」，两个量差一个数量级，却拿同一个阈值卡。
+///
+/// 实测代价（HEB_list 832 个源窗，共 6.4 小时）：满足 `gap > 100×baseline`
+/// 且 `≤ 1 s` 的空洞里，14478 条通过闸门、25 条被整包平均率挡掉。被挡掉的
+/// 25 条全部落在 15.6–17.9 ms，与通过的那批同一段；>100 ms 和 <10 ms 都是
+/// 0 条——闸门没有挡住任何**另一类**东西，只是切掉了同一人群的低速率尾巴。
+///
+/// 改为滑窗后在 12 个整小时（含 SAA 进出、断档小时、221009A、2024-05-11
+/// 斩波小时）上对照：只增不减，+54 条、全部 15.1–18.8 ms，无一条长洞；
+/// 最安静那小时新增的 10 条，1K 事例流逐条复现、长度一致到 0.01 ms。
+///
+/// 16 个事例在 15,600 evt/s 下横跨约 1 ms，足以分辨那种爆发；再小则率估计
+/// 本身的泊松涨落会把本底抬过阈值（闸门是放行向的，虚高只会放进误报）。
+const RATE_WINDOW_EVENTS: usize = 16;
 /// 从单个包的时间跨度和事件数估算平均事件间隔 (秒/事件)。
 /// 如果包内时间跨度过小（<1μs）或事件数不足，返回 None。
 fn mean_event_interval(summary: &PacketTimeSummary) -> Option<f64> {
@@ -74,14 +98,24 @@ fn mean_event_interval(summary: &PacketTimeSummary) -> Option<f64> {
     Some(span / summary.n_events as f64)
 }
 
-/// 从单个包估算事件率 (events/s)。
-/// 如果包内时间跨度过小（<1μs）或事件数不足，返回 None。
-fn event_rate(summary: &PacketTimeSummary) -> Option<f64> {
-    let span = summary.max_met - summary.min_met;
-    if span < 1e-6 || summary.n_events < 2 {
+/// 包内 `RATE_WINDOW_EVENTS` 事例滑窗的最大率 (events/s)。
+/// `times` 必须升序。事例数不足一个滑窗时退化为整段（仍按间隔数估率）。
+///
+/// k 个事例张开 T 秒里有 k−1 个间隔，所以率取 (k−1)/T：泊松过程下
+/// E[T] = (k−1)/λ，用 k/T 会系统性高估 k/(k−1)。
+fn peak_event_rate(times: &[f64]) -> Option<f64> {
+    if times.len() < 2 {
         return None;
     }
-    Some(summary.n_events as f64 / span)
+    let k = RATE_WINDOW_EVENTS.min(times.len());
+    let mut best: f64 = 0.0;
+    for w in times.windows(k) {
+        let span = w[k - 1] - w[0];
+        if span > 1e-9 {
+            best = best.max((k - 1) as f64 / span);
+        }
+    }
+    (best > 0.0).then_some(best)
 }
 
 /// 检测整包丢失（FIFO reset）造成的饱和区间。
@@ -91,7 +125,8 @@ fn event_rate(summary: &PacketTimeSummary) -> Option<f64> {
 /// 2. 按 min_met 排序
 /// 3. 对每对相邻包：
 ///    - baseline = 紧邻两包中平均事件间隔较小的那个（事件率较高的包）
-///    - local_max_rate = ±5 包窗口内（包含紧邻 2 包，共最多 12 包）的最大事件率
+///    - local_max_rate = ±5 包窗口内（包含紧邻 2 包，共最多 12 包）各包
+///      `RATE_WINDOW_EVENTS` 事例滑窗峰值率的最大者
 ///    - 若 local_max_rate < MCU_READ_RATE_FLOOR → 跳过（源率不到饱和阈值）
 ///    - 若 gap > baseline × GAP_FACTOR → 标记为 FifoReset
 pub fn detect_fifo_reset_intervals(sci_data: &SciFile, offset: f64) -> Vec<SaturationInterval> {
@@ -99,17 +134,19 @@ pub fn detect_fifo_reset_intervals(sci_data: &SciFile, offset: f64) -> Vec<Satur
 
     let mut summaries: Vec<PacketTimeSummary> = Vec::new();
     for (pkt_idx, times) in packet_times.iter().enumerate() {
-        let valid: Vec<f64> = times.iter().copied().filter(|t| !t.is_nan()).collect();
+        let mut valid: Vec<f64> = times.iter().copied().filter(|t| !t.is_nan()).collect();
         if valid.is_empty() {
             continue;
         }
-        let min_met = valid.iter().cloned().reduce(f64::min).unwrap();
-        let max_met = valid.iter().cloned().reduce(f64::max).unwrap();
+        valid.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let min_met = valid[0];
+        let max_met = valid[valid.len() - 1];
         summaries.push(PacketTimeSummary {
             pkt_idx,
             min_met,
             max_met,
             n_events: valid.len(),
+            peak_rate: peak_event_rate(&valid),
         });
     }
 
@@ -131,14 +168,14 @@ pub fn detect_fifo_reset_intervals(sci_data: &SciFile, offset: f64) -> Vec<Satur
             (None, None) => continue,
         };
 
-        // 用 ±5 包窗口（含紧邻 2 包）的最大事件率作为本地源率估计：
-        // 单包率有涨落，扩展到 12 包窗口取最大值更稳健。
+        // 用 ±5 包窗口（含紧邻 2 包）的最大瞬时率作为本地源率估计：
+        // 单个滑窗有涨落，扩展到 12 包窗口取最大值更稳健。
         let lo = wi.saturating_sub(5);
         let hi = (wi + 6).min(summaries.len() - 1);
         let mut local_max_rate = 0.0_f64;
         let mut found = false;
         for k in lo..=hi {
-            if let Some(r) = event_rate(&summaries[k]) {
+            if let Some(r) = summaries[k].peak_rate {
                 local_max_rate = local_max_rate.max(r);
                 found = true;
             }
@@ -812,6 +849,65 @@ fn effective_duration(lo: f64, hi: f64, unreliable: &[UnreliableInterval]) -> f6
 
 
 /// 空 bin 插值：从最近的有值 bin 做线性插值，边缘用最近有值 bin 常数外推。
+#[cfg(test)]
+mod rate_window_tests {
+    use super::*;
+
+    fn even_stream(rate: f64, n: usize, t0: f64) -> Vec<f64> {
+        (0..n).map(|i| t0 + i as f64 / rate).collect()
+    }
+
+    /// 均匀流上，滑窗峰值率就是那个率——(k−1)/T 的取法不能带偏置。
+    #[test]
+    fn uniform_stream_gives_its_own_rate() {
+        let t = even_stream(4_000.0, 109, 0.0);
+        let r = peak_event_rate(&t).unwrap();
+        assert!((r - 4_000.0).abs() < 1.0, "peak rate {r}, expected 4000");
+    }
+
+    /// 这条是判据缺陷的回归测试。一个包裹 109 个事例：64 个是 4 kHz 本底，
+    /// 45 个是 1.5 ms 内的 30 kHz 爆发——照着 HEB 源窗里实测的洞前形态造的
+    /// （1 ms 分辨下峰值 23–35 kHz）。整包平均率约 6 kHz，够不到 15 kHz
+    /// 闸门；滑窗必须看见爆发，否则这类 FIFO reset 全部漏检。
+    #[test]
+    fn short_spike_survives_packet_averaging() {
+        let mut t = even_stream(4_000.0, 64, 0.0);
+        let t_spike = t[32];
+        for i in 0..45 {
+            t.push(t_spike + (i as f64 + 1.0) / 30_000.0);
+        }
+        t.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+        let span = t[t.len() - 1] - t[0];
+        let packet_average = t.len() as f64 / span;
+        assert!(
+            packet_average < MCU_READ_RATE_FLOOR,
+            "packet average {packet_average} should sit below the gate, that is the whole point"
+        );
+        assert!(
+            peak_event_rate(&t).unwrap() > MCU_READ_RATE_FLOOR,
+            "the sliding window has to see the spike the packet average hides"
+        );
+    }
+
+    /// 事例数不足一个滑窗时退化为整段，不能直接返回 None——
+    /// 包尾/包首的短包也要参与本地率估计。
+    #[test]
+    fn short_packet_degrades_to_whole_span() {
+        let t = even_stream(20_000.0, 5, 0.0);
+        let r = peak_event_rate(&t).unwrap();
+        assert!((r - 20_000.0).abs() < 1.0, "peak rate {r}, expected 20000");
+        assert!(peak_event_rate(&t[..1]).is_none(), "one event has no rate");
+        assert!(peak_event_rate(&[]).is_none(), "no events, no rate");
+    }
+
+    /// 所有事例同一时刻（重建退化）不能产生无穷大率。
+    #[test]
+    fn zero_span_is_not_a_rate() {
+        assert!(peak_event_rate(&[1.0; 20]).is_none());
+    }
+}
+
 #[cfg(test)]
 mod weight_tests {
     use super::*;
