@@ -48,6 +48,9 @@ struct PacketTimeSummary {
 /// 而不是 1.4%），所以门槛必须留得高得多。只在 `stable_event_rate` 返回
 /// `None`（率窗口里一个包都没有，通常是数据边缘）时走这条路。
 ///
+/// 实测**没有任何检出依赖这条分支**：把它推到 0（永远通过）和 1e9（永远不过），
+/// 四个小时（安静 / 亮暴 / 斩波 / 断档）的检出数一个不变。
+///
 /// # 关于「持续斩波检不出」
 ///
 /// 这里原先写着：深饱和时探测器进入逐机箱连续斩波（约 7 ms 填满 FIFO → 复位
@@ -100,10 +103,26 @@ const MIN_POISSON_EXPONENT: f64 = 30.0;
 
 /// 估计稳定率用的半窗（秒）。要长到把率估计的涨落压进百分之几（本底率下
 /// 1 s 约 5000 个事例，σ≈1.4%），又短到跟得上进出 SAA 那种真实的率变化。
+///
+/// 实测在当前阈值下不敏感：13 个整小时上扫 0.1 / 0.25 / 0.5 / 1.0 / 2.0（以及
+/// 0.001 和 10），**结果逐条相同**——两群的稳定 λT 离 30 太远，几个百分点的率
+/// 差挪不动任何一条。把 `MIN_POISSON_EXPONENT` 推到 100（制造大量边缘样本）后
+/// 旋钮就转了：安静小时 26 / 19 / 1 / 1 / 1，窗越窄率估得越高、越宽松（窄窗贴着
+/// 洞前的高率段）。所以 0.5 不是中性的，只是当前阈值离敏感区够远。
 const STABLE_RATE_HALF_WINDOW: f64 = 0.5;
 
 /// FIFO Reset gap 的最大持续时间（秒）。超过此值的 gap 不认为是 FIFO 复位，
 /// 而是数据传输中断、SAA 等其他原因。正常 FIFO reset gap 在 8ms~100ms 量级。
+///
+/// # 实测它现在是空转的
+///
+/// 13 个整小时上扫 1 / 2 / 5 / 10 / 30 / 100 s：**结果逐条相同**，一条也没多出来
+/// ——这些小时里根本没有超过 1 s 还能过另外两关的候选洞。往下扫旋钮是转的
+/// （20 ms 砍掉三成，5 ms 几乎砍光），所以不是扫描失灵。
+///
+/// 原因是 `LOCAL_RATE_FLOOR` 接管了它本来的活：长洞出现在中断段，那里洞旁的
+/// 事例本来就稀，边缘率过不了闸门。也就是说这个上界目前是冗余的，**没有在漏检
+/// 方向挡住东西**——这是查过的结论，不是假设。
 const MAX_FIFO_RESET_GAP: f64 = 1.0;
 
 /// MCU 从 FIFO A 读出的速率 (events/s)：109 events / ~7 ms ≈ 15,600，取 15000
@@ -161,6 +180,11 @@ const LOCAL_RATE_FLOOR: f64 = 2000.0;
 ///
 /// 16 个事例在 15,600 evt/s 下横跨约 1 ms，足以分辨那种爆发；再小则率估计
 /// 自身的泊松涨落会明显偏高。
+///
+/// 实测这个值现在不敏感：13 个整小时上扫 8 / 12 / 16 / 24 / 32 / 48，**结果逐条
+/// 相同**，连 2 和 100 都一样。它只喂 `edge_rate`，而 `LOCAL_RATE_FLOOR` 本身
+/// 空转（见那里的扫描），所以窗口大小无从体现。把闸门推到 12000（开始咬）之后
+/// 旋钮就转了（安静小时 44→38），说明扫描是活的。
 const RATE_WINDOW_EVENTS: usize = 16;
 /// 一段（包头或包尾）事例的率 (events/s)。`times` 必须升序。
 ///
@@ -196,41 +220,63 @@ fn local_event_rate(prev: &PacketTimeSummary, next: &PacketTimeSummary) -> Optio
 
 /// 空洞附近 ±`STABLE_RATE_HALF_WINDOW` 秒的稳定事例率 (events/s)。
 ///
-/// 用包级计数求和除以**活时间**（窗口内各包时间覆盖之和），不是除以窗长——
-/// 窗口里若含别的空洞，除以窗长会把率压低、λT 跟着压低，那是漏检方向。
+/// 计数按包与窗口的交叠比例分摊，除以窗口内被包覆盖的**并集**时长。
+///
+/// # 为什么分母必须是并集
+///
+/// 同一个盒的包在时间上**会互相重叠**：拥塞时会出现「宽包」，109 个事例横跨
+/// 几百毫秒，压在几十个正常包（亮暴下约 3 ms 一个）之上。2026-01-25T19 实测
+/// 一个 1 s 窗里 117 个包，跨度中位 2.98 ms 但最宽 987 ms，逐包交叠求和得
+/// 3.78 s、真实并集只有 0.59 s，平均重叠 6.3 层。
+///
+/// 拿求和当活时间，宽包每个白送近 1 s 分母却只带 109 个事例，率被稀释约十倍
+/// （该处 3,289/s 对真实的约 35,000/s）——λT 跟着塌，**是漏检方向**。
+///
+/// 同理往前回退找起点不能一见 `max_met < lo` 就停：包按 `min_met` 排序，宽包
+/// 的 `max_met` 可以远在后面。`reach[i]` 是 `max_met[0..=i]` 的前缀最大值，
+/// 单调不减，据它回退才不漏包。（改之前 Rust 提前停、Python 不停，两边算同一个
+/// 量差出两三倍，就是这个。）
 ///
 /// 这里用包级平均是对的：反对包级平均是因为要分辨毫秒尖峰（那是 FIFO 闸门的
 /// 活，见 `RATE_WINDOW_EVENTS`），而泊松零假设要的恰恰是长窗口的平均率。
 ///
-/// `summaries` 必须已按 `min_met` 升序。窗口内没有任何包覆盖时返回 `None`，
-/// 由调用方回退到边缘率判据。
-fn stable_event_rate(summaries: &[PacketTimeSummary], center: f64) -> Option<f64> {
+/// `summaries` 必须已按 `min_met` 升序，`reach` 是它的 `max_met` 前缀最大值。
+/// 窗口内没有任何包覆盖时返回 `None`，由调用方回退到边缘率判据。
+fn stable_event_rate(
+    summaries: &[PacketTimeSummary],
+    reach: &[f64],
+    center: f64,
+) -> Option<f64> {
     let (lo, hi) = (
         center - STABLE_RATE_HALF_WINDOW,
         center + STABLE_RATE_HALF_WINDOW,
     );
-    // 包按 min_met 升序，第一个可能与窗口相交的包是 min_met < hi 的最后一段之前；
-    // 往前退到 max_met < lo 为止即可，中断段里单个包可能很长，所以退的时候看 max。
-    let first = summaries.partition_point(|s| s.min_met < lo);
-    let mut counts = 0.0;
-    let mut live = 0.0;
-    let mut i = first;
-    while i > 0 && summaries[i - 1].max_met >= lo {
+    let end = summaries.partition_point(|s| s.min_met <= hi);
+    let mut i = end;
+    while i > 0 && reach[i - 1] >= lo {
         i -= 1;
     }
-    while i < summaries.len() && summaries[i].min_met <= hi {
-        let s = &summaries[i];
-        let span = s.max_met - s.min_met;
-        let ov = s.max_met.min(hi) - s.min_met.max(lo);
-        if ov > 0.0 {
-            live += ov;
-            counts += if span > 1e-9 {
-                s.n_events as f64 * ov / span
-            } else {
-                s.n_events as f64
-            };
+
+    let mut counts = 0.0;
+    let mut live = 0.0;
+    let mut frontier = lo;
+    for s in &summaries[i..end] {
+        let a = s.min_met.max(lo);
+        let b = s.max_met.min(hi);
+        if b <= a {
+            continue;
         }
-        i += 1;
+        let span = s.max_met - s.min_met;
+        counts += if span > 1e-9 {
+            s.n_events as f64 * (b - a) / span
+        } else {
+            s.n_events as f64
+        };
+        // 包按 min_met 升序 ⇒ a 单调不减，一次扫描就能并集
+        if b > frontier {
+            live += b - a.max(frontier);
+            frontier = b;
+        }
     }
     (live > 1e-6).then_some(counts / live)
 }
@@ -273,6 +319,14 @@ pub fn detect_fifo_reset_intervals(sci_data: &SciFile, offset: f64) -> Vec<Satur
 
     summaries.sort_by(|a, b| a.min_met.partial_cmp(&b.min_met).unwrap());
 
+    // max_met 的前缀最大值：包可能互相重叠（拥塞宽包），按它回退才不漏包。
+    let mut reach: Vec<f64> = Vec::with_capacity(summaries.len());
+    let mut run = f64::NEG_INFINITY;
+    for s in &summaries {
+        run = run.max(s.max_met);
+        reach.push(run);
+    }
+
     let mut intervals = Vec::new();
     for window in summaries.windows(2) {
         let gap = window[1].min_met - window[0].max_met;
@@ -288,7 +342,7 @@ pub fn detect_fifo_reset_intervals(sci_data: &SciFile, offset: f64) -> Vec<Satur
             continue;
         }
 
-        let beats_poisson = match stable_event_rate(&summaries, window[0].max_met) {
+        let beats_poisson = match stable_event_rate(&summaries, &reach, window[0].max_met) {
             Some(stable) => gap * stable > MIN_POISSON_EXPONENT,
             None => gap * edge_rate > GAP_FACTOR,
         };
@@ -1057,6 +1111,12 @@ mod rate_window_tests {
 
     /// 造一串包：每包 109 个事例，率 `rate`，从 `t0` 起连续铺，
     /// `skip` 给出要挖掉的包序号（模拟空洞）。
+    /// `max_met` 的前缀最大值，和 `detect_fifo_reset_intervals` 里建的一样。
+    fn reach_of(s: &[PacketTimeSummary]) -> Vec<f64> {
+        let mut run = f64::NEG_INFINITY;
+        s.iter().map(|p| { run = run.max(p.max_met); run }).collect()
+    }
+
     fn packet_train(rate: f64, n_pkt: usize, t0: f64, skip: &[usize]) -> Vec<PacketTimeSummary> {
         let span = 108.0 / rate;
         (0..n_pkt)
@@ -1073,7 +1133,7 @@ mod rate_window_tests {
     fn stable_rate_recovers_a_uniform_stream() {
         let s = packet_train(4_000.0, 60, 0.0, &[]);
         let center = s[30].max_met;
-        let r = stable_event_rate(&s, center).unwrap();
+        let r = stable_event_rate(&s, &reach_of(&s), center).unwrap();
         assert!((r - 4_000.0).abs() < 60.0, "stable rate {r}, expected 4000");
     }
 
@@ -1084,18 +1144,60 @@ mod rate_window_tests {
         // 抠掉窗口中间 6 个包，约占窗口的四分之一
         let s = packet_train(4_000.0, 60, 0.0, &[31, 32, 33, 34, 35, 36]);
         let center = s[30].max_met;
-        let r = stable_event_rate(&s, center).unwrap();
+        let r = stable_event_rate(&s, &reach_of(&s), center).unwrap();
         assert!(
             (r - 4_000.0).abs() < 200.0,
             "a hole inside the window must not drag the rate down, got {r}"
         );
     }
 
+    /// 拥塞时会出现「宽包」：109 个事例横跨几百毫秒，压在几十个正常包之上。
+    /// 分母若按逐包交叠求和，宽包每个白送近一整个窗宽却只带 109 个事例，率被
+    /// 稀释；必须用被覆盖时间的**并集**。2026-01-25T19 实测稀释了约十倍。
+    #[test]
+    fn a_wide_packet_lying_across_the_window_must_not_dilute_the_rate() {
+        let mut v = packet_train(36_000.0, 400, 0.0, &[]);
+        let (lo, hi) = (v[0].min_met, v[v.len() - 1].max_met);
+        // 一个横跨全窗的宽包，事例数和正常包一样
+        v.push(PacketTimeSummary {
+            pkt_idx: 9999,
+            min_met: lo,
+            max_met: hi,
+            n_events: 109,
+            head_rate: Some(109.0 / (hi - lo)),
+            tail_rate: Some(109.0 / (hi - lo)),
+        });
+        v.sort_by(|a, b| a.min_met.partial_cmp(&b.min_met).unwrap());
+        let center = (lo + hi) / 2.0;
+        let r = stable_event_rate(&v, &reach_of(&v), center).unwrap();
+        assert!(
+            r > 30_000.0,
+            "a single wide packet must not drag 36 kHz down to {r}"
+        );
+    }
+
+    /// 宽包的 `max_met` 远在后面，按 `min_met` 排序后往前回退不能一见
+    /// `max_met < lo` 就停——那样会把它漏掉，两个实现就会算出不同的率。
+    #[test]
+    fn the_walk_back_uses_the_prefix_reach_not_the_neighbour() {
+        let mut v = vec![PacketTimeSummary {
+            pkt_idx: 0, min_met: 0.0, max_met: 10.0, n_events: 109,
+            head_rate: Some(10.9), tail_rate: Some(10.9),
+        }];
+        // 中间塞一批 max_met 都小于窗口下界的窄包
+        v.extend(packet_train(4_000.0, 20, 0.1, &[]));
+        v.sort_by(|a, b| a.min_met.partial_cmp(&b.min_met).unwrap());
+        let reach = reach_of(&v);
+        // 窗口落在宽包尾部、窄包之后
+        let r = stable_event_rate(&v, &reach, 9.5);
+        assert!(r.is_some(), "the wide packet still covers this window and must be found");
+    }
+
     /// 窗口里一个包都没有时返回 None，由调用方回退到边缘率判据。
     #[test]
     fn stable_rate_is_none_when_the_window_is_empty() {
         let s = packet_train(4_000.0, 4, 0.0, &[]);
-        assert!(stable_event_rate(&s, 1_000.0).is_none());
+        assert!(stable_event_rate(&s, &reach_of(&s), 1_000.0).is_none());
     }
 
     /// 判据的分工：泊松那一关吃稳定率，FIFO 闸门吃边缘率。
