@@ -1120,6 +1120,60 @@ pub fn reconstruct_with_wrap_tracking_labeled(
             "  ghosts: {} dead-zone + {} order-violation = {} total",
             n_ghost_deadzone, n_ghost_order, n_ghost_deadzone + n_ghost_order
         );
+        // 尾戳能否钉 wrap 整数：实测 u = (包内最早事例) − MET_CORRECTION − tail。
+        // 尾戳是打包那一整秒，事例必在打包之前 ⇒ u ∈ (−D, 1)，D = 排队 + 装包。
+        // 要唯一确定整圈数，窗宽 (1 + D) 必须 < 一圈 1.048576 s ⇒ **D < 48.6 ms**。
+        // 注意 result 里的时间已含 MET_CORRECTION(=4.0)，而 tail 在 stime+offset
+        // 标度上，必须先减掉，否则测出来整体偏 4 秒（吃过这个亏）。
+        // D 由装包时间主导，跟速率强相关，所以按包内跨度分层，只有高速率
+        // （= 真正需要钉圈数的饱和段）那一层说了算。
+        let mut layers: [(&str, Vec<f64>); 3] =
+            [("span<20ms", vec![]), ("20-200ms", vec![]), (">200ms", vec![])];
+        for (pkt_idx, times) in result.iter().enumerate() {
+            let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+            for t in times {
+                if !t.is_nan() {
+                    lo = lo.min(*t);
+                    hi = hi.max(*t);
+                }
+            }
+            if !lo.is_finite() {
+                continue;
+            }
+            let tail = get_utc_tail(&sci_data.ccsds[pkt_idx]);
+            let u = lo - MET_CORRECTION - tail;
+            let span = hi - lo;
+            let k = if span < 0.020 {
+                0
+            } else if span < 0.200 {
+                1
+            } else {
+                2
+            };
+            layers[k].1.push(u);
+        }
+        for (name, v) in layers.iter_mut() {
+            if v.is_empty() {
+                continue;
+            }
+            v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let q = |f: f64| v[((v.len() - 1) as f64 * f) as usize];
+            let n_bad = v.iter().filter(|x| **x < -10.0).count();
+            // 窗宽判据：去掉坏尾戳后，u 的全幅必须窄于一圈才可能唯一定圈
+            let good: Vec<f64> = v.iter().copied().filter(|x| *x >= -10.0).collect();
+            let span_all = good.last().unwrap_or(&0.0) - good.first().unwrap_or(&0.0);
+            let span_99 = q(0.99) - q(0.01);
+            eprintln!(
+                "  u=min_met-4-tail [{}]: n={} 坏尾戳 {} ({:.2}%) | med {:.4} p1 {:.4} p99 {:.4} \
+                 good_min {:.4} good_max {:.4} | 全幅 {:.4} p1-p99 {:.4} vs 一圈 1.048576 => {}",
+                name, v.len(), n_bad, 100.0 * n_bad as f64 / v.len() as f64,
+                q(0.5), q(0.01), q(0.99),
+                good.first().copied().unwrap_or(f64::NAN),
+                good.last().copied().unwrap_or(f64::NAN),
+                span_all, span_99,
+                if span_all < 1.048576 { "可钉" } else { "不可钉" }
+            );
+        }
         eprintln!(
             "  unwrap: {} gaps solved by stream unwrapping, {} fell back",
             n_unwrapped, n_unwrap_failed
