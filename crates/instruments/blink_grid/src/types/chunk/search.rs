@@ -41,32 +41,41 @@ const DEAD_GAP_EXPECTED_COUNTS: f64 = 9.2;
 /// （03B 277/277），失去的只有辐射带。取本底窗速率与过境速率中的大者比较。
 const RATE_CEILING: f64 = 5000.0;
 
-/// 最显著一格里落在 **≥3 重同戳簇** 上的事例占比上限（f₃）。
+/// 带电粒子否决：最显著一格里 ≥3 重同戳簇的个数 k₃ 与它的偶然期望 λ₃ 做泊松检验，
+/// `P(K₃ ≥ k₃ | SAFETY·λ₃) < MAX_TRIPLE_P` 即否决。
 ///
 /// 挡的是穿过整星的带电粒子：四块 GAGG 同时响应、各留一个大沉积，时间戳完全相同
 /// （同一探头从不同戳，1.11e8 个探头内相邻对里严格为 0，所以同戳必然是跨探头的）。
 /// 四路合成一路搜索没有组间符合可用，这道门是天格挡带电粒子的唯一手段。
 ///
-/// **为什么数三重而不是数"最长的一串"。** 原先的判据是同戳占比（f₂ 口径的最长串）
-/// 阈 0.35。它有两个毛病：
+/// **为什么不再用固定的占比阈（v11 的 f₃ > 0.5）。** 同戳簇最多 4 重（4 路、同探头
+/// 不重格），`min_number = 8` ⇒ 只含一个簇的候选 f₃ ≤ 4/8 = 0.5，所以 f₃ > 0.5 对
+/// 最典型的"一次四路穿越"恒不触发，实际等价于"窗内 ≥2 个三重簇才否决"。亮而短的
+/// 注入网格（九格 × 6 万次）里它连一次都没响过。见 `OPEN-QUESTIONS.md` 未决项 19。
 ///
-/// 1. **对重复发生的粒子失明。** 实测有一批候选是几百微秒里重复 2–4 次三四路同戳，
-///    每一串除以总计数都不到 0.35，整批漏过去了——v10 的 38 个 03B 显著候选里 12 个
-///    带这种形态，而它们的旧判据值全部落在 0.273–0.333，紧贴在阈值下面。
-/// 2. **偶然基底太高。** 窗内 n 个事例散在时长 T 上、量化步 q = 2⁻²² s 时，二重同戳
-///    的偶然期望是 (n−1)·q/T，实测中位 0.0113、最大 0.069——阈到噪声只有 5–31 倍。
-///    三重的偶然期望是它的平方量级（`Σ_{k≥3} k·m·C(n,k)p^k(1−p)^{n−k} / n`，
-///    `m = T/q`、`p = 1/m`），实测中位 5.6e-5、最大 2.1e-3，**实测非零者的
-///    实测/偶然最小 1.1e4**。同一批数据上，判别量从 5–31 倍的分离变成四个数量级。
+/// **λ₃ 两项相加。**
+/// 1. 量化偶然：窗内各路事例不相干、撞进同一个 2⁻²² s 格。逐探头口径（同探头不重格、
+///    三重必须来自 ≥3 路），`a_d = n_d/m`、`m = T/q`，
+///    `λ₃ᵠ = m·Σ_{|S|≥3} Π_{d∈S} a_d · Π_{d∉S}(1−a_d)`，四路就 5 项。
+/// 2. 本底粒子落进窗：本底三重簇率 r₃ × T。**这一项大 34 倍**（全池 1.82 对 0.054），
+///    只算第一项会把 λ₃ 低估一个多数量级、偏向误杀。
 ///
-/// **阈取 0.5**：实测 f₃ 在 0.333 与 0.600 之间有一个干净的空隙，0.35–0.55 之间取
-/// 任何值否决的候选完全相同（8 个）。取上沿是为了多一层保护——真暴窗里偶然混进
-/// 一个粒子三重就是 3/n，n = 8 时 0.375 会被 0.35 误杀、0.5 不会。7 个有闪电认证的
-/// 真 TGF 的 f₃ **全部为 0**，一个例外都没有。见 `OPEN-QUESTIONS.md` 未决项 14。
-const MAX_TRIPLE_FRACTION: f64 = 0.5;
+/// **安全系数 2**：均匀独立假设在真暴发成团的时间结构下低估 λ₃，保结构的两种做法
+/// （逐探头随机平移、局部密度解析）在 26 个干净候选上给出的低估上界都 ≤ 2 倍。
+///
+/// **阈 1e-3**：显著池（fa ≤ 1e-5）误杀期望 0.007 个候选，亮而短注入网格的误杀率
+/// ≤ 0.07%；7 个闪电认证的 TGF k₃ = 0、p = 1，任何阈下都不碰。
+const MAX_TRIPLE_P: f64 = 1e-3;
+const TRIPLE_LAMBDA_SAFETY: f64 = 2.0;
 
 /// 一簇同戳事例要几个才算粒子签名。二重不算：偶然期望 1% 量级，压不住噪声。
 const TRIPLE: usize = 3;
+
+/// 事例时戳的量化步：`TIME × 2²²` 的小数部分四颗星都严格为 0。
+const TICK_S: f64 = 1.0 / 4_194_304.0;
+
+/// 天格每颗星 4 路探头
+const N_DETECTORS: usize = 4;
 
 /// 本底窗 `[from, to]`（已夹到候选所在的 GTI 段内）里是否有读出空洞。
 ///
@@ -93,38 +102,104 @@ fn has_dead_gap<S: Satellite>(events: &[Event<S>], from: f64, to: f64, pass_rate
     rate * longest > DEAD_GAP_EXPECTED_COUNTS
 }
 
-/// 最显著一格 `[start, stop]` 里落在 ≥3 重同戳簇上的事例数，占该格事例数的比例（f₃）。
-///
-/// 数的是**所有**这样的簇的计数之和，不是最长的那一串——重复出现的多重同戳正是
-/// 现行判据漏掉的那种粒子形态（见 `MAX_TRIPLE_FRACTION`）。
-///
-/// `events` 已按时间排好，时间戳相同的事例必然相邻，扫一遍分段即可。两端都是事例
-/// 本身的时刻（`Candidate` 的 start 与 delay、bin_size_best 都来自事例），闭区间
-/// 比较，边界上那一簇不会漏。
-fn triple_fraction<S: Satellite>(
-    events: &[Event<S>],
-    start: MissionElapsedTime<Grid<S>>,
-    stop: MissionElapsedTime<Grid<S>>,
-) -> f64 {
-    let lo = events.partition_point(|e| e.time() < start);
-    let hi = events.partition_point(|e| e.time() <= stop);
-    let window = &events[lo..hi];
-    if window.is_empty() {
-        return 0.0;
-    }
-    let (mut in_clusters, mut run) = (0usize, 1usize);
+/// `events[lo..hi]` 里重数 ≥3 的同戳簇个数。时间戳相同的事例必然相邻，扫一遍分段即可。
+fn triple_clusters<S: Satellite>(window: &[Event<S>]) -> usize {
+    let (mut clusters, mut run) = (0usize, 1usize);
     for i in 1..=window.len() {
-        let same = i < window.len() && window[i].time() == window[i - 1].time();
-        if same {
+        if i < window.len() && window[i].time() == window[i - 1].time() {
             run += 1;
         } else {
             if run >= TRIPLE {
-                in_clusters += run;
+                clusters += 1;
             }
             run = 1;
         }
     }
-    in_clusters as f64 / window.len() as f64
+    clusters
+}
+
+/// 时刻落在闭区间 `[from, to]` 内的那一段事例。
+fn slice_between<S: Satellite>(events: &[Event<S>], from: f64, to: f64) -> &[Event<S>] {
+    let lo = events.partition_point(|e| e.time().met() < from);
+    let hi = events.partition_point(|e| e.time().met() <= to);
+    &events[lo..hi.max(lo)]
+}
+
+/// 量化偶然的三重簇期望（逐探头口径），见 `MAX_TRIPLE_P`。
+fn chance_triples(per_detector: &[usize; N_DETECTORS], duration: f64) -> f64 {
+    let m = duration / TICK_S;
+    if m <= 0.0 {
+        return 0.0;
+    }
+    let a: Vec<f64> = per_detector
+        .iter()
+        .map(|&n| (n as f64 / m).min(1.0))
+        .collect();
+    let mut sum = 0.0;
+    for subset in 0u32..(1 << N_DETECTORS) {
+        if (subset.count_ones() as usize) < TRIPLE {
+            continue;
+        }
+        sum += (0..N_DETECTORS)
+            .map(|d| {
+                if subset >> d & 1 == 1 {
+                    a[d]
+                } else {
+                    1.0 - a[d]
+                }
+            })
+            .product::<f64>();
+    }
+    m * sum
+}
+
+/// `P(X ≥ k)`，`X ~ Poisson(lam)`。
+///
+/// 直接累尾，不用 `1 − 前 k 项`：后者在尾部小时灾难性相消，λ ~ 1e-3、k ≥ 5 直接得 0
+/// （真值 8.3e-18），而这里 λ₃ 能小到 1e-6。
+fn poisson_tail(k: usize, lam: f64) -> f64 {
+    if k == 0 {
+        return 1.0;
+    }
+    if lam <= 0.0 {
+        return 0.0;
+    }
+    // 首项 e^{-λ} λ^k / k! 在对数里算，之后逐项乘 λ/(i+1)
+    let ln_first = -lam + k as f64 * lam.ln() - (1..=k).map(|i| (i as f64).ln()).sum::<f64>();
+    let mut term = ln_first.exp();
+    let mut total = 0.0;
+    for i in k..k + 1000 {
+        total += term;
+        if term < 1e-18 * total.max(1e-300) {
+            break;
+        }
+        term *= lam / (i + 1) as f64;
+    }
+    total.min(1.0)
+}
+
+/// 最显著一格 `[start, stop]` 的粒子检验 p 值：`P(K₃ ≥ k₃ | SAFETY·λ₃)`。
+///
+/// `background_rate` 是本底三重簇率（个/s）。两端都是事例本身的时刻（`Candidate` 的
+/// start、delay、bin_size_best 都来自事例），闭区间比较，边界上那一簇不会漏。
+fn triple_p_value<S: Satellite>(
+    events: &[Event<S>],
+    start: MissionElapsedTime<Grid<S>>,
+    stop: MissionElapsedTime<Grid<S>>,
+    background_rate: f64,
+) -> f64 {
+    let window = slice_between(events, start.met(), stop.met());
+    let k3 = triple_clusters(window);
+    if k3 == 0 {
+        return 1.0;
+    }
+    let mut per_detector = [0usize; N_DETECTORS];
+    for e in window {
+        per_detector[(e.detector as usize).min(N_DETECTORS - 1)] += 1;
+    }
+    let duration = stop.met() - start.met();
+    let lam = chance_triples(&per_detector, duration) + background_rate * duration;
+    poisson_tail(k3, TRIPLE_LAMBDA_SAFETY * lam)
 }
 
 pub(super) fn search<S: Satellite>(chunk: &Chunk<S>) -> Vec<Signal<Event<S>>> {
@@ -173,6 +248,23 @@ pub(super) fn search<S: Satellite>(chunk: &Chunk<S>) -> Vec<Signal<Event<S>>> {
             coincidence: 1,
         },
     );
+
+    // 各次过境的本底三重簇率（个/s），粒子否决用，见 `MAX_TRIPLE_P`
+    let pass_triple_rates: Vec<f64> = chunk
+        .passes
+        .iter()
+        .map(|p| {
+            // 事例只取到本小时内，过境时长也截到本小时
+            let (from, to) = (
+                p.start.max(chunk.span[0].met()),
+                p.stop.min(chunk.span[1].met()),
+            );
+            if S::SHARED_FRAME || to <= from {
+                return 0.0;
+            }
+            triple_clusters(slice_between(&events, from, to)) as f64 / (to - from)
+        })
+        .collect();
 
     let attitudes = attitude_trajectory::<S>(&chunk.posatt);
     let positions = position_trajectory::<S>(&chunk.posatt);
@@ -231,13 +323,33 @@ pub(super) fn search<S: Satellite>(chunk: &Chunk<S>) -> Vec<Signal<Event<S>>> {
             // 物理**。实测把 03B 的真暴按共帧读出重放，这道门会否掉一半左右的真
             // 暴发（最亮的那个有闪电认证的 TGF 有 76% 的试验被它砍掉），而穿星
             // 粒子在共帧下只留 4 个计数、根本够不着候选门，轮不到这道门。
+            //
+            // 本底三重簇率取两者中的大者：候选所在 ±0.5 s 本底窗（扣掉候选窗本身，
+            // 免得粒子候选用自己的簇抬高本底）与整次过境。本底窗里期望只有一个上下
+            // 的簇，单独用它常常是 0，λ₃ 被压低就偏向误杀；取大者只会让门更难触发。
             let best_start = candidate.start + candidate.delay;
             let best_stop = best_start + candidate.bin_size_best;
-            if !S::SHARED_FRAME
-                && triple_fraction(&events, best_start, best_stop) > MAX_TRIPLE_FRACTION
-            {
-                n_simultaneous += 1;
-                return None;
+            if !S::SHARED_FRAME {
+                let local = {
+                    let all = triple_clusters(slice_between(&events, from, to));
+                    let own = triple_clusters(slice_between(&events, cs, ce));
+                    let live = (to - from) - (ce - cs);
+                    if live > 0.0 {
+                        all.saturating_sub(own) as f64 / live
+                    } else {
+                        0.0
+                    }
+                };
+                let pass = chunk
+                    .passes
+                    .iter()
+                    .position(|p| cs >= p.start && cs <= p.stop)
+                    .map(|i| pass_triple_rates[i])
+                    .unwrap_or(0.0);
+                if triple_p_value(&events, best_start, best_stop, local.max(pass)) < MAX_TRIPLE_P {
+                    n_simultaneous += 1;
+                    return None;
+                }
             }
             // 单路毛刺否决。四块 GAGG 并排同向，真暴发四路均分：v3 全量真候选的单路
             // 最大占比中位 0.36、最高 0.56；超过 0.9 的 3 个全是一路探测器自己在闹
@@ -378,66 +490,112 @@ mod tests {
         assert!(detector_share(&on_detectors(&v)) > MAX_DETECTOR_FRACTION);
     }
 
-    fn fraction(times: &[f64]) -> f64 {
-        let events = at(times);
-        triple_fraction(&events, events[0].time(), events[events.len() - 1].time())
+    fn p_value(times_and_detectors: &[(f64, u8)], background_rate: f64) -> f64 {
+        let events = on_detectors(times_and_detectors);
+        triple_p_value(
+            &events,
+            events[0].time(),
+            events[events.len() - 1].time(),
+            background_rate,
+        )
+    }
+
+    /// 8 个事例铺在 `span` 秒上、依次落在 4 路，`crossing` 处插一次四路同戳。
+    fn with_crossings(span: f64, crossings: &[f64]) -> Vec<(f64, u8)> {
+        let mut v: Vec<(f64, u8)> = (0..8)
+            .map(|i| (100.0 + span * i as f64 / 7.0, (i % 4) as u8))
+            .collect();
+        for &c in crossings {
+            v.extend((0..4).map(|d| (100.0 + c, d as u8)));
+        }
+        v.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        v
     }
 
     #[test]
-    fn a_particle_crossing_puts_half_the_counts_on_one_timestamp() {
-        // 四路各一个、时间戳完全相同，再加 4 个零星本底：4/8 = 0.5
-        let times = [
-            100.0, 100.0, 100.0, 100.0, 100.0002, 100.0004, 100.0006, 100.0008,
-        ];
-        assert!((fraction(&times) - 0.5).abs() < 1e-12);
+    fn a_single_four_detector_crossing_is_caught() {
+        // v11 的 f₃ > 0.5 对这种形态恒不触发（4/12 = 0.33）；泊松检验看的是
+        // "300 µs 里出现一次三重簇"本身有多不可能：量化 7e-5 + 本底 1 个/s × 300 µs
+        let p = p_value(&with_crossings(300e-6, &[150e-6]), 1.0);
+        assert!(p < MAX_TRIPLE_P, "p = {p}");
     }
 
     #[test]
-    fn particles_crossing_twice_are_caught_although_no_single_run_is_long() {
-        // 旧判据漏掉的那种形态：几百微秒里重复两次三路同戳，最长一串只有 3/10 = 0.3，
-        // 但落在三重簇里的计数是 6/10 = 0.6
-        let times = [
-            100.0, 100.0, 100.0, 100.0001, 100.0003, 100.0004, 100.0004, 100.0004, 100.0006,
-            100.0007,
-        ];
-        assert!((fraction(&times) - 0.6).abs() < 1e-12);
-        assert!(fraction(&times) > MAX_TRIPLE_FRACTION);
+    fn a_single_crossing_in_a_dense_window_sits_near_the_threshold() {
+        // 判据最薄的一处：12 个计数挤在 100 µs 里，量化偶然本身就有 6e-4，一个簇的
+        // p ≈ 1.4e-3，放过。这与 v10 那 4 个单簇候选 p = 4–5e-4（×2 后 8–10e-4）同一档，
+        // 单簇的证据强度本来就只有这么多。见 `OPEN-QUESTIONS.md` 未决项 19
+        let p = p_value(&with_crossings(100e-6, &[50e-6]), 1.0);
+        assert!(p > 1e-4 && p < 1e-2, "p = {p}");
     }
 
     #[test]
-    fn a_burst_with_one_stray_particle_survives() {
-        // 真暴窗里偶然混进一个粒子三重：3/9 = 0.333，阈 0.5 留得住（0.35 会误杀）
-        let times = [
-            100.0, 100.0, 100.0, 100.0002, 100.0004, 100.0006, 100.0008, 100.0010, 100.0012,
-        ];
-        assert!((fraction(&times) - 1.0 / 3.0).abs() < 1e-12);
-        assert!(fraction(&times) < MAX_TRIPLE_FRACTION);
+    fn repeated_crossings_are_caught() {
+        let p = p_value(&with_crossings(300e-6, &[50e-6, 200e-6]), 1.0);
+        assert!(p < 1e-6, "p = {p}");
+    }
+
+    #[test]
+    fn a_crossing_is_let_through_where_particles_are_common() {
+        // 本底三重簇率高到 20 个/s 时，1 ms 窗里套进一个粒子的期望 0.02（×2 = 0.04），
+        // 一个簇的 p ≈ 0.04，判据自己让路
+        let p = p_value(&with_crossings(1e-3, &[0.5e-3]), 20.0);
+        assert!(p > MAX_TRIPLE_P, "p = {p}");
+    }
+
+    #[test]
+    fn a_burst_without_clusters_is_never_vetoed() {
+        let v: Vec<(f64, u8)> = (0..20)
+            .map(|i| (100.0 + i as f64 * 5e-6, (i % 4) as u8))
+            .collect();
+        assert_eq!(p_value(&v, 1.0), 1.0);
     }
 
     #[test]
     fn pairs_on_one_timestamp_do_not_count() {
-        // 二重同戳的偶然期望是 1% 量级，压不住噪声，所以只数三重及以上：全是二重 → 0
-        let times = [
-            100.0, 100.0, 100.0002, 100.0002, 100.0004, 100.0004, 100.0006, 100.0006,
-        ];
-        assert_eq!(fraction(&times), 0.0);
-    }
-
-    #[test]
-    fn a_burst_spread_over_the_timestamp_grid_is_kept() {
-        // 20 个事例铺在 4.77 µs 的时间戳格上，每格最多两个：一个三重都没有
-        let tick = 4.768e-6;
-        let times: Vec<f64> = (0..20).map(|i| 100.0 + (i / 2) as f64 * tick).collect();
-        assert_eq!(fraction(&times), 0.0);
+        // 二重同戳的偶然期望是 1% 量级，压不住噪声，所以只数三重及以上
+        let v: Vec<(f64, u8)> = (0..8)
+            .map(|i| (100.0 + (i / 2) as f64 * 2e-4, (i % 2) as u8))
+            .collect();
+        assert_eq!(triple_clusters(&on_detectors(&v)), 0);
+        assert_eq!(p_value(&v, 1.0), 1.0);
     }
 
     #[test]
     fn the_cluster_on_the_window_edge_is_counted() {
-        // 簇正好落在窗口末端：闭区间比较才数得到它，4/7
-        let times = [
-            100.0, 100.0001, 100.0002, 100.0003, 100.0003, 100.0003, 100.0003,
+        // 簇正好落在窗口末端：闭区间比较才数得到它
+        let v = [
+            (100.0, 0),
+            (100.0001, 1),
+            (100.0002, 2),
+            (100.0003, 0),
+            (100.0003, 1),
+            (100.0003, 2),
+            (100.0003, 3),
         ];
-        assert!((fraction(&times) - 4.0 / 7.0).abs() < 1e-12);
+        assert_eq!(triple_clusters(&on_detectors(&v)), 1);
+        assert!(p_value(&v, 0.0) < 1.0);
+    }
+
+    #[test]
+    fn chance_triples_match_the_closed_form_for_equal_detectors() {
+        // 四路各 n 个、m 格：λ₃ = m·[4a³(1−a) + a⁴]，a = n/m
+        let t = 1e-3;
+        let m = t / TICK_S;
+        let a = 5.0 / m;
+        let want = m * (4.0 * a.powi(3) * (1.0 - a) + a.powi(4));
+        let got = chance_triples(&[5, 5, 5, 5], t);
+        assert!((got / want - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn the_poisson_tail_does_not_cancel() {
+        // 1 − 前 k 项在这里会得 0；直接累尾：P(X≥5 | 1e-3) ≈ λ⁵/5!·e^{-λ}
+        let lam: f64 = 1e-3;
+        let want = lam.powi(5) / 120.0 * (-lam).exp();
+        assert!((poisson_tail(5, lam) / want - 1.0).abs() < 1e-3);
+        assert_eq!(poisson_tail(0, lam), 1.0);
+        assert!((poisson_tail(1, 2.0) - (1.0 - (-2.0f64).exp())).abs() < 1e-12);
     }
 
     #[test]
