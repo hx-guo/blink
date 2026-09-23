@@ -458,9 +458,12 @@ pub fn reconstruct_with_wrap_tracking_labeled(
                 cached_utc_max = utc_ticks.clamp(0, total_ticks);
                 if debug && ds > 1 && pkt_idx == pkt_a {
                     eprintln!(
-                        "    UTC probe pkt {}: tail={:.0} sec1.met={:.6} tail-sec1={:.3}s \
+                        "    UTC probe pkt {}: offset={:.1} tail={:.0} sec1.met={:.6} \
+                         sec1.stime={:.0} tail-stime={:.3}s tail-sec1met={:.3}s \
                          utc_ticks={} total={} → utc_max={}",
-                        pkt_idx, utc_tail, sec1.met, utc_tail - sec1.met,
+                        pkt_idx, offset, utc_tail, sec1.met,
+                        sec1.met - offset, utc_tail - (sec1.met - offset),
+                        utc_tail - sec1.met,
                         utc_ticks, total_ticks, cached_utc_max
                     );
                 }
