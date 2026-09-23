@@ -389,6 +389,8 @@ pub fn reconstruct_with_wrap_tracking_labeled(
     let mut n_resolved = 0u64;
     let mut n_ghost_deadzone = 0u64;
     let mut n_ghost_order = 0u64;
+    let mut n_unwrapped = 0u64;
+    let mut n_unwrap_failed = 0u64;
     let mut n_sec_pairs = 0u64;
 
     // 有效 SEC 按打包顺序排列的索引
@@ -549,8 +551,161 @@ pub fn reconstruct_with_wrap_tracking_labeled(
             const BRACKET_GUARD: i64 = 200_000; // 跨链/端点残差上限（400ms < 半圈）
             const WINDOW_SLACK: i64 = 2_500; // 窗端漂移余量（5ms）
 
+            // 连续被剔的候选上限：幽灵零星出现，成片被剔是圈数解错的征兆。
+            const MAX_SKIP_RUN: usize = 4;
+
             let mut bracketed_done = false;
-            if ds >= BRACKET_MIN_DS && std::env::var("BLINK_EXHAUSTIVE").is_err() {
+
+            // ─── 沿流序相位解缠：保序即约束，wrap 整数不用搜 ───
+            //
+            // ptime 是 19 位 2µs 计数器，一圈 PTIME_MOD = 524288 ticks =
+            // 1.048576 s；硬件每秒往 FIFO 塞一个 SEC，1.000000 s < 一圈，
+            // **余量 48.576 ms**。FIFO 严格保序 ⇒ 流里相邻事例的真实间隔小于
+            // 一圈，于是回绕次数由「elapsed_fwd 是否回退」唯一确定：
+            //
+            //     w_i = w_{i-1} + (1 if ef_i < ef_{i-1} else 0)
+            //
+            // 这条递推按构造不可能违反保序，也没有「多个候选选哪个」的问题。
+            // 分组 LIS 是在搜一个本来有闭式解的量，而且两支长度相当时它没有
+            // 信息分辨谁对——实测 2026-01-25T19 就是整块包被判早一圈，
+            // 落进斩波死区把真空洞填上、切成碎片（全任务抽样 1000 小时：
+            // 包级错配 952 条**全部**出现在 Δstime>1 的小时，无歧义的 590 个
+            // 小时一条都没有）。
+            //
+            // # 证书
+            //
+            // 解出来的 elapsed 必须同时满足：单调（构造保证）、不超过该包 UTC
+            // 尾戳给的上界、且末端与第二个锚点闭合到一圈以内。任一条不过就回退
+            // 到下方原路径，行为与旧版完全一致——所以这是只增不减的改动。
+            //
+            // 证书兜住的是**单个 ptime 被打坏**（CRC 过得去的位翻转）：一个幽灵
+            // 会造成一次虚增圈，末端闭合就差整整一圈，必然被抓到。全任务抽样里
+            // 这类事例占 1.8e-7，且在无歧义小时同样出现——解缠治不了它，
+            // 但能把它从「悄悄污染」变成「证书失败、退回原路径」。
+            if std::env::var("BLINK_NO_UNWRAP").is_err() && !candidates.is_empty() {
+                // # 幽灵与真回绕怎么分开
+                //
+                // 朴素解缠「ef 一回退就增圈」只在无幽灵时成立。一个幽灵的 ptime 是
+                // 随机值，也会造成一次回退，跟着虚增一圈，把它之后的整片顶出上界。
+                //
+                // 判别是**局部且无阈值**的：回退位 k（`ef[k] < ef[k-1]`）若能靠删掉
+                // **一个**候选就消除，它就是幽灵造成的；删不掉的才是真回绕。
+                //
+                //   幽灵在 k-1（ef 虚高）：删掉它 ⇒ `ef[k] >= ef[k-2]`
+                //   幽灵在 k  （ef 虚低）：删掉它 ⇒ `ef[k+1] >= ef[k-1]`
+                //   真回绕：ef[k-1] 贴着整圈、ef[k] 贴着 0，两侧邻居也在两端，
+                //           删谁都恢复不了单调
+                //
+                // 曾经试过「代价 `(pmod−ef[k-1])+ef[k]` 最小的就是真回绕」，**错的**：
+                // 深饱和段里真有几百毫秒的数据空当，跨过它的真回绕代价同样很大。
+                // 实测 2026-01-25T19 一个 ds=4 段：6 个回退位、代价 min 38 中位
+                // 286226，按代价挑 3 个当真回绕会让 29% 的候选被剔掉，而正确解的
+                // 闭合残差只有 34 ticks（68 µs）。
+                let n_cand = candidates.len();
+                let mut ghost = vec![false; n_cand];
+                // 反复扫：删掉幽灵后可能露出新的回退位（相邻两个幽灵）
+                for _ in 0..4 {
+                    // 当前存活序列的下标
+                    let live: Vec<usize> = (0..n_cand).filter(|&i| !ghost[i]).collect();
+                    let ef = |p: usize| candidates[live[p]].elapsed_fwd;
+                    let mut found = false;
+                    let mut p = 1;
+                    while p < live.len() {
+                        if ef(p) < ef(p - 1) {
+                            // 删 p-1 能消除？
+                            if p >= 2 && ef(p) >= ef(p - 2) {
+                                ghost[live[p - 1]] = true;
+                                found = true;
+                            } else if p + 1 < live.len() && ef(p + 1) >= ef(p - 1) {
+                                ghost[live[p]] = true;
+                                found = true;
+                            }
+                        }
+                        p += 1;
+                    }
+                    if !found {
+                        break;
+                    }
+                }
+
+                // 清理后逐个解缠：剩下的回退位都是真回绕
+                let mut w = 0i64;
+                let mut prev_ef = -1i64;
+                let mut last_elapsed = -1i64;
+                let mut n_skipped = ghost.iter().filter(|g| **g).count() as u64;
+                let mut run = 0usize; // 连续被剔的候选数
+                let mut max_run = 0usize;
+                let mut solved: Vec<(usize, i64)> = Vec::with_capacity(n_cand);
+                for (ci, c) in candidates.iter().enumerate() {
+                    if ghost[ci] {
+                        continue;
+                    }
+                    if prev_ef >= 0 && c.elapsed_fwd < prev_ef {
+                        w += 1;
+                    }
+                    let e = c.elapsed_fwd + w * pmod;
+                    if e > total_ticks || e > c.utc_max_elapsed {
+                        n_skipped += 1;
+                        run += 1;
+                        max_run = max_run.max(run);
+                        continue;
+                    }
+                    run = 0;
+                    prev_ef = c.elapsed_fwd;
+                    last_elapsed = e;
+                    solved.push((ci, e));
+                }
+                let w_used = w;
+
+                // 证书：闭合到一圈内、确实解出事例、剔除率不离谱
+                let mut ok = !solved.is_empty();
+                let mut why = "";
+                if ok && total_ticks - last_elapsed >= pmod {
+                    ok = false;
+                    why = "closure short";
+                }
+                if ok && n_skipped * 20 > n_cand as u64 {
+                    ok = false;
+                    why = "too many skipped";
+                }
+                // 幽灵是零星的：**连续成片**被剔说明那一段的圈数解错了，
+                // 不是幽灵。放过它会把真数据整段删掉——实测 2026-01-25T19
+                // 曾因此删掉 428 ms 的事例，把 20 条真梳齿（1K 逐条确认，
+                // 15.10–15.47 ms）并成一个 428 ms 的假洞。
+                if ok && max_run > MAX_SKIP_RUN {
+                    ok = false;
+                    why = "contiguous skip run";
+                }
+                if debug && !ok {
+                    eprintln!(
+                        "    gap ds={}: {} cand, {} ghosts, {} wraps, last {} residual {}",
+                        ds, n_cand, n_skipped, w_used, last_elapsed, total_ticks - last_elapsed
+                    );
+                }
+                if ok {
+                    n_ghost_deadzone += n_skipped;
+                    for (i, e) in solved.into_iter() {
+                        actual_elapsed[i] = e;
+                        alive[i] = true;
+                    }
+                    bracketed_done = true;
+                    n_unwrapped += 1;
+                    if debug {
+                        eprintln!(
+                            "  UNWRAP gap ds={}: {}/{} events, {} wraps, {} skipped, residual {} ticks",
+                            ds, candidates.len() - n_skipped as usize, candidates.len(), w_used,
+                            n_skipped, total_ticks - last_elapsed
+                        );
+                    }
+                } else {
+                    n_unwrap_failed += 1;
+                    if debug {
+                        eprintln!("  UNWRAP gap ds={}: certificate failed ({}), falling back", ds, why);
+                    }
+                }
+            }
+
+            if !bracketed_done && ds >= BRACKET_MIN_DS && std::env::var("BLINK_EXHAUSTIVE").is_err() {
                 'bracket: {
                     // 1. 收集 gap 内全部 SEC 槽（流序），按逐秒相位一致性切 run
                     #[derive(Clone, Copy)]
@@ -953,6 +1108,10 @@ pub fn reconstruct_with_wrap_tracking_labeled(
         eprintln!(
             "  ghosts: {} dead-zone + {} order-violation = {} total",
             n_ghost_deadzone, n_ghost_order, n_ghost_deadzone + n_ghost_order
+        );
+        eprintln!(
+            "  unwrap: {} gaps solved by stream unwrapping, {} fell back",
+            n_unwrapped, n_unwrap_failed
         );
         eprintln!(
             "STEP4 single-anchor edges: {} leading + {} trailing = {} events resolved, {} rejected by UTC gate",
