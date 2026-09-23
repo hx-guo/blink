@@ -456,6 +456,14 @@ pub fn reconstruct_with_wrap_tracking_labeled(
                 // +1 因为 UTC tail 是整秒截断
                 let utc_ticks = ((utc_tail + 1.0 - sec1.met) / 2e-6) as i64;
                 cached_utc_max = utc_ticks.clamp(0, total_ticks);
+                if debug && ds > 1 && pkt_idx == pkt_a {
+                    eprintln!(
+                        "    UTC probe pkt {}: tail={:.0} sec1.met={:.6} tail-sec1={:.3}s \
+                         utc_ticks={} total={} → utc_max={}",
+                        pkt_idx, utc_tail, sec1.met, utc_tail - sec1.met,
+                        utc_ticks, total_ticks, cached_utc_max
+                    );
+                }
                 last_pkt_idx = pkt_idx;
             }
             let start = if pkt_idx == pkt_a { evt_a + 1 } else { 0 };
