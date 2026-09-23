@@ -41,6 +41,8 @@ pub struct Chunk<S: Satellite> {
     pub(super) dropped_single_detector: AtomicUsize,
     /// 本底窗里片上标定脉冲开着而被否决的候选数，见 `search`
     pub(super) dropped_pulser: AtomicUsize,
+    /// 扣掉 ≥3 重同戳簇后最显著一格不足 `min_number` 而被否决的候选数，见 `search`
+    pub(super) dropped_residual: AtomicUsize,
     /// 读不出来（如 0 字节）而跳过的位姿文件数
     pub(super) posatt_unreadable: usize,
     /// 位置解在黑名单上被抹掉的位姿文件数（见 `io::orbit_fit::posatt_blacklisted`）
@@ -146,6 +148,10 @@ impl<S: Satellite> blink_core::traits::Chunk for Chunk<S> {
         let pulser = self.dropped_pulser.load(Ordering::Relaxed);
         if pulser > 0 {
             d.push(("dropped_pulser", pulser as f64));
+        }
+        let residual = self.dropped_residual.load(Ordering::Relaxed);
+        if residual > 0 {
+            d.push(("dropped_residual", residual as f64));
         }
         d
     }

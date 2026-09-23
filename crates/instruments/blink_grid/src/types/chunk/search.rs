@@ -71,6 +71,16 @@ const TRIPLE_LAMBDA_SAFETY: f64 = 2.0;
 /// 一簇同戳事例要几个才算粒子签名。二重不算：偶然期望 1% 量级，压不住噪声。
 const TRIPLE: usize = 3;
 
+/// 候选门的最少计数，与 `SearchConfig.min_number` 同值；扣簇后的剩余计数也要够它。
+///
+/// 泊松检验问的是"窗里出现 k₃ 个簇有多意外"，但一个窗之所以成为候选，可能**正是因为**
+/// 那一簇的 3–4 个同戳计数凑满了 8——条件在"已经是候选"上，簇就不再意外，检验看不出来。
+/// v12/v13 回归日里有 3 个显著候选是这种形态：窗里恰好一次四路同戳、另有 4–6 个计数，
+/// p = 1.2–1.9e-3 刚过阈，扣掉簇只剩 4–6 个。同戳计数是粒子不是光子，扣掉之后不够候选门
+/// 就不是候选。真暴发里偶然混进一簇的，扣 3–4 个之后计数通常仍 ≥ 8；7 个闪电认证 k₃ = 0，
+/// 这道门碰不到它们。
+const MIN_COUNTS: u32 = 8;
+
 /// 事例时戳的量化步：`TIME × 2²²` 的小数部分四颗星都严格为 0。
 const TICK_S: f64 = 1.0 / 4_194_304.0;
 
@@ -176,6 +186,22 @@ fn pulser_on<S: Satellite>(events: &[Event<S>], from: f64, to: f64) -> bool {
         })
         .count();
     on_comb as f64 / (clusters.len() - 1) as f64 > PULSER_COMB_FRACTION
+}
+
+/// 最显著一格里不在 ≥3 重同戳簇上的事例数。
+fn residual_counts<S: Satellite>(window: &[Event<S>]) -> usize {
+    let (mut in_clusters, mut run) = (0usize, 1usize);
+    for i in 1..=window.len() {
+        if i < window.len() && window[i].time() == window[i - 1].time() {
+            run += 1;
+        } else {
+            if run >= TRIPLE {
+                in_clusters += run;
+            }
+            run = 1;
+        }
+    }
+    window.len() - in_clusters
 }
 
 /// 量化偶然的三重簇期望（逐探头口径），见 `MAX_TRIPLE_P`。
@@ -296,7 +322,7 @@ pub(super) fn search<S: Satellite>(chunk: &Chunk<S>) -> Vec<Signal<Event<S>>> {
             neighbor: Time::new::<uom::si::time::second>(1.0),
             hollow: Time::new::<uom::si::time::millisecond>(10.0),
             false_positive_per_year: 20.0,
-            min_number: 8,
+            min_number: MIN_COUNTS,
             // 单组：4 个 GAGG 同型，合成一路
             coincidence: 1,
         },
@@ -331,6 +357,7 @@ pub(super) fn search<S: Satellite>(chunk: &Chunk<S>) -> Vec<Signal<Event<S>>> {
     let mut n_no_attitude = 0usize;
     let mut n_single_detector = 0usize;
     let mut n_pulser = 0usize;
+    let mut n_residual = 0usize;
     let half_neighbor = 0.5_f64;
     let signals = results
         .into_iter()
@@ -410,6 +437,12 @@ pub(super) fn search<S: Satellite>(chunk: &Chunk<S>) -> Vec<Signal<Event<S>>> {
                     n_simultaneous += 1;
                     return None;
                 }
+                if residual_counts(slice_between(&events, best_start.met(), best_stop.met()))
+                    < MIN_COUNTS as usize
+                {
+                    n_residual += 1;
+                    return None;
+                }
             }
             // 单路毛刺否决。四块 GAGG 并排同向，真暴发四路均分：v3 全量真候选的单路
             // 最大占比中位 0.36、最高 0.56；超过 0.9 的 3 个全是一路探测器自己在闹
@@ -486,6 +519,7 @@ pub(super) fn search<S: Satellite>(chunk: &Chunk<S>) -> Vec<Signal<Event<S>>> {
         .dropped_single_detector
         .store(n_single_detector, Ordering::Relaxed);
     chunk.dropped_pulser.store(n_pulser, Ordering::Relaxed);
+    chunk.dropped_residual.store(n_residual, Ordering::Relaxed);
     signals
 }
 
@@ -700,6 +734,30 @@ mod tests {
         // 天然本底里 ±0.5 s 只有一两个簇，够不着簇数下限
         let events = pulser_train(100.0, 3, 0);
         assert!(!pulser_on(&events, 100.0, 101.0));
+    }
+
+    #[test]
+    fn one_crossing_that_fills_the_candidate_leaves_too_few_counts() {
+        // 窗里一次四路同戳 + 5 个零散计数：9 个够候选门，扣掉簇只剩 5
+        let v = with_crossings(300e-6, &[150e-6]);
+        let events = on_detectors(&v[..]);
+        let mut short: Vec<(f64, u8)> =
+            v.iter().copied().filter(|x| x.0 < 100.0 + 150e-6).collect();
+        short.extend((0..4).map(|d| (100.0 + 150e-6, d as u8)));
+        assert_eq!(residual_counts(&events), 8);
+        assert_eq!(residual_counts(&on_detectors(&short)), short.len() - 4);
+        assert!(residual_counts(&on_detectors(&short)) < MIN_COUNTS as usize);
+    }
+
+    #[test]
+    fn a_bright_burst_with_a_stray_cluster_keeps_enough_counts() {
+        // 20 个光子铺开 + 偶然混进一个三重：剩 20，远够
+        let mut v: Vec<(f64, u8)> = (0..20)
+            .map(|i| (100.0 + i as f64 * 5e-6, (i % 4) as u8))
+            .collect();
+        v.extend((0..3).map(|d| (100.00003, d as u8)));
+        v.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        assert!(residual_counts(&on_detectors(&v)) >= MIN_COUNTS as usize);
     }
 
     #[test]
