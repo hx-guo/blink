@@ -68,6 +68,7 @@ pub fn cmd_reconstruct(
     // gap 协方差块表行（spec §13），写到 --gapcov-out 单独文件。观测事件回归权重 1
     // （普通泊松）；恢复引入的协方差全部收进每 gap 的块，不再挂逐粒子权重。
     let mut gapcov_rows: Vec<String> = Vec::new();
+    let mut n_gap_out_of_window = 0usize;
     // gap 格结构表行（spec ③），写到 --gapbins-out。每 (gap,1ms 格) 一行，只有
     // cross-ref gap 有 S filler↔参考结构（退化 gap 的 bins 为空、不产行）。
     let mut gapbins_rows: Vec<String> = Vec::new();
@@ -105,6 +106,21 @@ pub fn cmd_reconstruct(
         if box_shown {
             for gr in &gap_results {
                 let gap = &box_data[i].1.gaps[gr.gap_idx];
+                // 事件流按 [met_min, met_max] 裁剪，gap 表必须用同一把尺子：
+                // 重建跑的是整小时加载进来的全部 gap，窗外那些的 filler 会被事件
+                // 流滤掉，如果 gap 表照写，下游看到的就是「有 gap 记录、无填充
+                // 事件」，n_lost 也会凭空多出一截（260226A：11 个 gap、681 个事例）。
+                if gap.stop_met < met_min || gap.start_met > met_max {
+                    n_gap_out_of_window += 1;
+                    continue;
+                }
+                if gap.start_met < met_min || gap.stop_met > met_max {
+                    eprintln!(
+                        "  WARN Box {}: gap[{}] [{:.6}, {:.6}] 跨越窗边界，\
+                         filler 被裁掉一部分，该 gap 的 n_lost 与事件流不守恒",
+                        box_data[i].0, gr.gap_idx, gap.start_met, gap.stop_met,
+                    );
+                }
                 gapcov_rows.push(gap_cov_row(
                     gr.gap_idx,
                     &box_data[i].0,
@@ -201,9 +217,14 @@ pub fn cmd_reconstruct(
                     eprintln!("  WARN: writing gapcov {}: {e}", path.display());
                 } else {
                     eprintln!(
-                        "  gap covariance block table → {} ({} gaps)",
+                        "  gap covariance block table → {} ({} gaps{})",
                         path.display(),
-                        gapcov_rows.len()
+                        gapcov_rows.len(),
+                        if n_gap_out_of_window > 0 {
+                            format!("，另有 {n_gap_out_of_window} 个整体落在窗外，未写出")
+                        } else {
+                            String::new()
+                        }
                     );
                 }
             }

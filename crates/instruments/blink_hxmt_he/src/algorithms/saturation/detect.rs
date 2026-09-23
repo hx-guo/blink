@@ -914,9 +914,33 @@ pub fn reconstruct_gaps(
             continue;
         }
 
-        let mut filled_events = Vec::with_capacity(n_lost);
+        // 逐 bin 独立 round() 不守恒:n_lost 远小于 bin 数时每格期望都 <0.5,
+        // 全部抹成 0,整个 gap 一个 filler 都不产出 —— 而 n_lost 早已打进日志,
+        // 于是「检测报了 239 个 gap、输出只有 226 个有填充」。
+        // 改最大余数法:先取整数部分,余下名额按小数部分从大到小补,
+        // 保证 Σ n_in_bin == n_lost。
+        let mut quota = vec![0usize; n_sbins];
+        let mut remainder: Vec<(f64, usize)> = Vec::with_capacity(n_sbins);
+        let mut assigned = 0usize;
         for (si, &s) in shape.iter().enumerate() {
-            let n_in_bin = (s / total * n_lost as f64).round() as usize;
+            let exact = (s / total * n_lost as f64).max(0.0);
+            let base = exact.floor() as usize;
+            quota[si] = base;
+            assigned += base;
+            remainder.push((exact - base as f64, si));
+        }
+        // 小数降序;相同时按 bin 序,结果与排序实现无关
+        remainder.sort_by(|a, b| {
+            b.0.partial_cmp(&a.0)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then(a.1.cmp(&b.1))
+        });
+        for &(_, si) in remainder.iter().take(n_lost.saturating_sub(assigned)) {
+            quota[si] += 1;
+        }
+
+        let mut filled_events = Vec::with_capacity(n_lost);
+        for (si, &n_in_bin) in quota.iter().enumerate() {
             if n_in_bin > 0 {
                 let bin_lo = gap_start + si as f64 * actual_sbin;
                 let bin_hi = bin_lo + actual_sbin;
@@ -928,7 +952,7 @@ pub fn reconstruct_gaps(
         }
 
         // 退化 filler 的“仅方差”权重 v=√(σ²_gap/实际filler数),使 Σv²=σ²_gap。
-        // 用 filled_events.len()(逐 bin round 后可 ≠ n_lost),否则下游按实际
+        // 用 filled_events.len()(最大余数法后 == n_lost,保留取用以防形状退化),否则下游按实际
         // filler 数求和时不守恒。cross-ref=0；(None,None) 地板填充按 σ²=filler数²
         // (~100% 不确定)→ v=√(filler数),绝不给 0。
         let n_filled_actual = filled_events.len();
@@ -1447,6 +1471,40 @@ mod weight_tests {
 
     fn spread(lo: f64, hi: f64, n: usize) -> Vec<f64> {
         (0..n).map(|i| lo + (i as f64 + 0.5) * (hi - lo) / n as f64).collect()
+    }
+
+    /// 检测报了 n_lost 却一个 filler 都没产出：逐 bin 独立 round() 在
+    /// n_lost 远小于 bin 数时会把每一格都抹成 0。gap 进了结果、n_lost 计进
+    /// 日志总数，filled_events 却是空的 —— 日志与输出对不上就是这么来的。
+    #[test]
+    fn small_n_lost_over_many_bins_still_produces_fillers() {
+        // 1s 的 gap → 1000 个 1ms 形状格
+        let (g_lo, g_hi) = (1.0, 2.0);
+        // 目标盒：标定窗里 50+50 事例（≈100/s），gap 内饱和无事例
+        let target = make_box(
+            [spread(0.5, 1.0, 50), spread(2.0, 2.5, 50)].concat(),
+            vec![si(g_lo, g_hi)],
+        );
+        // 参考盒：标定窗里亮 100 倍（k≈0.01），gap 内每格 6 个事例
+        let reference = make_box(
+            [
+                spread(0.5, 1.0, 5000),
+                spread(g_lo, g_hi, 6000),
+                spread(2.0, 2.5, 5000),
+            ]
+            .concat(),
+            vec![],
+        );
+        let (gaps, _rw) = reconstruct_gaps(&target, &[&reference]);
+
+        assert_eq!(gaps.len(), 1, "gap 应当进结果");
+        let g = &gaps[0];
+        assert!(g.n_lost > 0, "n_lost 应当为正，实际 {}", g.n_lost);
+        assert!(
+            !g.filled_events.is_empty(),
+            "n_lost={} 却产出 0 个 filler",
+            g.n_lost
+        );
     }
 
     /// 守恒:每个参考事件的权重贡献之和 == 总 filler 数。每个 filler 都完整
