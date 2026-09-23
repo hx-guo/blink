@@ -296,6 +296,104 @@ fn stable_event_rate(
     (live > 1e-6).then_some(counts / live)
 }
 
+/// 丢掉时间与打包顺序矛盾的包，返回保留掩码。
+///
+/// # 为什么可以这么判
+///
+/// FIFO A 严格保序，MCU 按序读出、按序打包，所以**按 `pkt_idx` 排序后各包的
+/// `min_met` 必须不减**。这是仪器的硬约束，不是经验规则。
+///
+/// 实测它几乎处处成立：2023-06-16T20、2019-05-30T10、2022-10-09T13（221009A）、
+/// 2024-05-11T20（斩波）、2021-02-13T06（断档）、2024-05-11T00 六个小时约 260 万
+/// 个包，违规**零次**。只有 2026-01-25T19 有 3 处（34 万包里），而且违规处的时间
+/// 位移中位 **1.0303 s**——对上 ptime 回绕周期 1.048576 s（2^19 × 2 µs）。
+///
+/// # 违反它的是什么
+///
+/// 是**整块包的 wrap 被判错**。深饱和斩波下每约 21 ms 出 2 个包（约 95 包/s），
+/// 所以「包号差 100」对应约 1.05 s，正好一个 wrap。那一段实测：
+///
+/// ```text
+/// 114341 [200.994142, 200.996914]     ← 真实梳齿的「开」相位
+/// 114342 [200.996920, 202.048572]     ← 末事例晚了一个 wrap
+/// 114538 [201.004632, 201.007984]     ← 包号 +200，却排在这里
+/// 114440 [201.006846, 201.009948]     ← 包号 +100，早了一个 wrap
+/// 114343 [201.015244, 201.018314]     ← 回到真实梳齿
+/// ```
+///
+/// 同段 1K 是干净的 15.2 ms 梳齿（约 6 ms 有数据 → 15.2 ms 死区）。被错配的包落进
+/// 死区里，把真实空洞**填上**，`detect` 于是只看到残余的 1.6–6.9 ms 碎片。
+///
+/// # 为什么是按包号贪心，不是最长不减子序列
+///
+/// 先试的是最长不减子序列，**挑错了边**。错配块与被它覆盖的正确块长度相当
+/// （那一小时各约 100 个包），对最长链是近似平局，LIS 没有信息分辨谁对，实测它
+/// 保留了错配的 1144xx、丢掉了真实的 1143xx，报出的洞随之整体偏 13 ms。
+///
+/// 可分辨的信息在包号里：**错配块的包号更大、时间却更早**（被判早了一个 wrap）。
+/// 所以按包号顺序走一遍、时间一旦倒退就剔，先被保住的必然是正确的那支。
+///
+/// 这条对「被判**晚**一个 wrap」的块不成立——那时贪心会先接受错的、把随后正确的
+/// 整片剔掉。实测的三处都是判早，没有遇到判晚的；真出现要靠包的 UTC 尾戳
+/// （`rec_sci_data.rs` 已用它给 wrap 候选定上界）另行判别，这里不兜底。
+///
+/// 根因在 `rec_sci_data.rs` 的 wrap 指派（深饱和时 SEC 锚点稀疏/损坏）。这里只做
+/// 剔除，不做修复：被剔的包时间不可信，它们覆盖的区间也就不再产出饱和结论。
+/// 包**内**的同一条不变量：事例按 `evt_idx` 读出，时间必须不减。
+/// 返回保序的子串（原序，无需排序）。
+///
+/// 违反它的是**单个事例的时间错了**，离群量实测约等于一个 ptime wrap：
+/// pkt 114342 的 109 个事例里，0–103 正常升序、第 104 个跳了 **1048.6 ms**
+/// （wrap = 1048.576 ms）、105–108 又回到正常。留着它 `max_met` 被撑到 202.05，
+/// `gap = 后包.min_met − 前包.max_met` 算成负数，那个真实空洞**整个被吞掉**
+/// ——实测正是这样漏掉了 1K 看得见的一齿。
+///
+/// # 为什么这里剔尖刺，包级那里用贪心
+///
+/// 两层的形状不同。包内是「1 个离群对 108 个正常」，一眼就知道谁错，剔掉孤立
+/// 尖刺即可。包级是「两支长度相当」（错配块与它覆盖的正确块各约 100 个包），
+/// 谁对要靠包号顺序来断。**按包号贪心用在包内会正好做反**：它会接受那个尖刺、
+/// 把后面 4 个正常事例全剔掉，`max_met` 反而更糟——实测踩过。
+fn fifo_ordered_prefix(times: &[f64]) -> Vec<f64> {
+    let v: Vec<f64> = times.iter().copied().filter(|t| !t.is_nan()).collect();
+    if v.len() < 3 {
+        return v;
+    }
+    // 一遍剔掉「比两侧都晚」的孤立尖刺。只判向上这一侧：向下的离群交给后面的
+    // 单调兜底去掉，若这里也判向下，尖刺**后面**那个正常事例会被连坐误剔。
+    let mut out = Vec::with_capacity(v.len());
+    for i in 0..v.len() {
+        let prev = if i == 0 { f64::NEG_INFINITY } else { v[i - 1] };
+        let next = if i + 1 == v.len() { f64::INFINITY } else { v[i + 1] };
+        if !(v[i] > next && v[i] > prev) {
+            out.push(v[i]);
+        }
+    }
+    // 兜底：`edge_event_rate` 要求升序，剩下的再过一遍单调
+    let mut kept = Vec::with_capacity(out.len());
+    let mut frontier = f64::NEG_INFINITY;
+    for t in out {
+        if t >= frontier {
+            frontier = t;
+            kept.push(t);
+        }
+    }
+    kept
+}
+
+fn fifo_consistent_mask(summaries: &[PacketTimeSummary]) -> Vec<bool> {
+    let mut keep = vec![true; summaries.len()];
+    let mut frontier = f64::NEG_INFINITY;
+    for (i, s) in summaries.iter().enumerate() {
+        if s.min_met < frontier {
+            keep[i] = false;
+        } else {
+            frontier = s.min_met;
+        }
+    }
+    keep
+}
+
 /// 检测整包丢失（FIFO reset）造成的饱和区间。
 ///
 /// 算法：
@@ -314,22 +412,48 @@ pub fn detect_fifo_reset_intervals(sci_data: &SciFile, offset: f64) -> Vec<Satur
     let packet_times = reconstruct_with_wrap_tracking(sci_data, offset);
 
     let mut summaries: Vec<PacketTimeSummary> = Vec::new();
+    let mut n_evt_dropped = 0usize;
+    let mut n_evt_total = 0usize;
     for (pkt_idx, times) in packet_times.iter().enumerate() {
-        let mut valid: Vec<f64> = times.iter().copied().filter(|t| !t.is_nan()).collect();
+        // FIFO 保序：包内按 evt_idx 时间必须不减，违反的是时间错了的事例。
+        // 保序子串本身就是升序的，不用再排。
+        let n_valid = times.iter().filter(|t| !t.is_nan()).count();
+        let valid = fifo_ordered_prefix(times);
+        n_evt_total += n_valid;
+        n_evt_dropped += n_valid - valid.len();
         if valid.is_empty() {
             continue;
         }
-        valid.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        let min_met = valid[0];
-        let max_met = valid[valid.len() - 1];
         summaries.push(PacketTimeSummary {
             pkt_idx,
-            min_met,
-            max_met,
+            min_met: valid[0],
+            max_met: valid[valid.len() - 1],
             n_events: valid.len(),
             head_rate: edge_event_rate(&valid[..RATE_WINDOW_EVENTS.min(valid.len())]),
             tail_rate: edge_event_rate(&valid[valid.len().saturating_sub(RATE_WINDOW_EVENTS)..]),
         });
+    }
+    if n_evt_dropped > 0 {
+        eprintln!(
+            "  warning: {} of {} events have times that contradict the read-out order \
+             within their packet (wrap misassignment); dropped from gap detection",
+            n_evt_dropped, n_evt_total
+        );
+    }
+
+    // FIFO 保序：按 pkt_idx 排序后 min_met 必须不减。违反的是 wrap 被判错的包，
+    // 留下它们会把真实空洞填上、切成碎片。见 `fifo_consistent_mask`。
+    let keep = fifo_consistent_mask(&summaries);
+    let n_dropped = keep.iter().filter(|k| !**k).count();
+    if n_dropped > 0 {
+        eprintln!(
+            "  warning: {} of {} packets have times that contradict the packing order \
+             (wrap misassignment); dropped from gap detection",
+            n_dropped,
+            summaries.len()
+        );
+        let mut it = keep.iter();
+        summaries.retain(|_| *it.next().unwrap());
     }
 
     summaries.sort_by(|a, b| a.min_met.partial_cmp(&b.min_met).unwrap());
@@ -1206,6 +1330,58 @@ mod rate_window_tests {
         // 窗口落在宽包尾部、窄包之后
         let r = stable_event_rate(&v, &reach, 9.5);
         assert!(r.is_some(), "the wide packet still covers this window and must be found");
+    }
+
+    /// 包内单个事例的时间跳了一个 wrap：剔掉它，前后正常的一个不少。
+    /// 按包号贪心用在这里会做反——它会接受尖刺、把后面正常的全剔掉。
+    #[test]
+    fn a_single_event_spiking_by_one_wrap_is_dropped() {
+        const WRAP: f64 = 524_288.0 * 2e-6;
+        let mut t = even_stream(36_000.0, 109, 100.0);
+        let good = t.clone();
+        t[104] += WRAP;
+        let kept = fifo_ordered_prefix(&t);
+        assert_eq!(kept.len(), 108, "exactly the spike goes, got {}", kept.len());
+        assert!(
+            (kept[kept.len() - 1] - good[108]).abs() < 1e-9,
+            "the packet must end where it really ends, not a wrap later"
+        );
+        assert!(kept.windows(2).all(|w| w[0] <= w[1]));
+    }
+
+    /// 干净的包一个事例都不该剔。
+    #[test]
+    fn a_clean_packet_keeps_every_event() {
+        let t = even_stream(36_000.0, 109, 0.0);
+        assert_eq!(fifo_ordered_prefix(&t).len(), 109);
+    }
+
+    /// 时间与打包顺序一致时一个都不该剔。
+    #[test]
+    fn a_well_ordered_stream_loses_nothing() {
+        let s = packet_train(4_000.0, 50, 0.0, &[]);
+        assert!(fifo_consistent_mask(&s).iter().all(|k| *k));
+    }
+
+    /// 一小块包被判早了一个 wrap，落进前面的死区里：必须整块剔掉，
+    /// 正确的那一支一个不少。照 2026-01-25T19 的形态造的——两支长度相当，
+    /// 最长不减子序列在这种近似平局下会挑错边，按包号贪心不会。
+    #[test]
+    fn a_block_displaced_by_one_wrap_is_dropped() {
+        const WRAP: f64 = 524_288.0 * 2e-6; // 1.048576 s
+        let mut v = packet_train(36_000.0, 200, 0.0, &[]);
+        let good = v.len();
+        // 取靠后的一小块，整体前移一个 wrap —— 包号仍在后面，时间却跑到前面去了
+        let mut bad = packet_train(36_000.0, 20, WRAP + 0.05, &[]);
+        for b in &mut bad {
+            b.min_met -= WRAP;
+            b.max_met -= WRAP;
+        }
+        v.extend(bad);
+        let keep = fifo_consistent_mask(&v);
+        assert_eq!(keep.iter().filter(|k| **k).count(), good, "the good run must survive whole");
+        assert!(keep[..good].iter().all(|k| *k), "and it must be the good run that survives");
+        assert!(keep[good..].iter().all(|k| !*k), "the displaced block must go");
     }
 
     /// 窗口里一个包都没有时返回 None，由调用方回退到边缘率判据。
