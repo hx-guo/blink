@@ -49,9 +49,9 @@ RED, BLUE, GREY = "#c53030", "#2b6cb0", "0.55"
 SAT_COLORS = {"GRID-02": "#d97706", "GRID-03B": "#c53030", "GRID-04": "#2b6cb0", "GRID-07": "#2f855a"}
 # 实测的读出时间尺度（逐探头相邻事例 dt 直方的硬边沿，单位 µs）。四星时戳栅格相同
 # （都是 2^-22 s = 0.2384 µs），差别在这里：GRID-03B 是逐探头独立的死时间 4.77 µs，
-# 另外三颗是四路共用的**帧长** 28.4–28.6 µs——帧内每路最多 1 个事例、全帧共用触发那
+# 另外三颗是四路共用的**帧长** 120 tick = 28.61 µs（02/07 先记的 119 tick 已按未决项 6 更正）——帧内每路最多 1 个事例、全帧共用触发那
 # 一击的时戳。见 blink_grid/OPEN-QUESTIONS.md 未决项 6 与 16。
-DEAD_TIME_US = {"GRID-02": 28.37, "GRID-03B": 4.77, "GRID-04": 28.61, "GRID-07": 28.37}
+DEAD_TIME_US = {"GRID-02": 28.61, "GRID-03B": 4.77, "GRID-04": 28.61, "GRID-07": 28.61}
 DEAD_TIME_NAME = {"GRID-03B": "探头死时间", "GRID-02": "读出帧长",
                   "GRID-04": "读出帧长", "GRID-07": "读出帧长"}
 ENERGY_THRESHOLD_KEV = 30.0
@@ -270,6 +270,8 @@ def fig_two_populations(d, out):
              "「一类高磁纬的非 TGF 事件」与「慢读出星特有的伪信号」用现有数据分不开。"
              % np.median(d["excess"][b]),
              ha="center", fontsize=12.5, color="0.3")
+    if d.get("note"):
+        fig.text(0.995, 0.905, d["note"], ha="right", va="top", fontsize=9, color="0.5")
     fig.tight_layout(rect=(0, 0.045, 1, 0.92)); fig.savefig(out, dpi=160); print("wrote", out)
     plt.close(fig)
 
@@ -337,6 +339,9 @@ def fig_map(d, out):
                GECAM_CPD_RATE_SELECTED / GECAM_CPD_RATE_ALL),
             transform=ax.transAxes, ha="center", va="top", fontsize=12.5,
             color="0.3", linespacing=1.6)
+    if d.get("note"):
+        ax.text(1.0, -0.62, d["note"], transform=ax.transAxes, ha="right", va="top",
+                fontsize=9, color="0.5")
     fig.savefig(out, dpi=160, bbox_inches="tight"); print("wrote", out)
     plt.close(fig)
 
@@ -472,7 +477,7 @@ def fig_lightcurves(lc_dir, out):
         ax.text(0.5, -0.30, ex["note"], transform=ax.transAxes, ha="center", fontsize=13, color="0.3")
 
     fig.suptitle("两类各一例：A 角是几十微秒的硬脉冲，B 角是 3 ms 的平顶、能谱与本底相同；"
-                 "GRID-03B 是 4.77 µs 的逐探头死时间，GRID-02 是 28.4 µs 的四路共帧读出", y=0.985)
+                 "GRID-03B 是 4.77 µs 的逐探头死时间，GRID-02 是 28.61 µs 的四路共帧读出", y=0.985)
     fig.savefig(out, dpi=170, bbox_inches="tight")
     plt.close(fig)
     print("wrote", out)
@@ -484,9 +489,11 @@ def main():
     ap.add_argument("-o", "--outdir", required=True)
     ap.add_argument("--lightcurves", help="逐事例导出目录，见 scripts/cluster/grid_lightcurve.py")
     ap.add_argument("--particles", help="f₃ 表（带电粒子签名），只有 GRID-03B 有")
+    ap.add_argument("--note", help="图角落的一行小字：搜索版本与否决口径，免得图流传出去不知道是哪一版")
     args = ap.parse_args()
     os.makedirs(args.outdir, exist_ok=True)
     d = load(args.features, args.t90, args.tgfs, args.particles)
+    d["note"] = args.note
     fig_two_populations(d, os.path.join(args.outdir, "grid_talk_1_populations.png"))
     fig_map(d, os.path.join(args.outdir, "grid_talk_2_map.png"))
     if args.lightcurves:
