@@ -9,6 +9,7 @@ use blink_core::types::MissionElapsedTime;
 // ─────────────────────────────────────────────────────────────────────────────
 
 const PTIME_MOD: u64 = 1 << 19; // 524288
+const PMOD_SECS: f64 = PTIME_MOD as f64 * 2e-6; // 一圈 1.048576 s
 
 /// 1B→1K 时间校正 (秒)。在 2026-02-26T10 一小时 Box A 重叠窗口
 /// （MET 446724004..446727603，3599 s, 9.52M 匹配事件）逐事例匹配：
@@ -405,6 +406,88 @@ pub fn reconstruct_with_wrap_tracking_labeled(
         result[sec.pkt_idx][sec.evt_idx] = sec.met + MET_CORRECTION;
     }
 
+    // ── 尾戳带的自标定 ──
+    // 包在第 109 个事例到达时发出，尾戳打的是包所在那个 1 Hz 周期的末端整秒，
+    // 所以「包末事例」相对尾戳的偏移 w = met_last − MET_CORRECTION − tail 只在
+    // 一条约 1 s 宽的带里变动。候选之间正好差一圈，所以带宽 W < 一圈时**至多
+    // 一个候选能落进带**。
+    //
+    // 但这不等于「不可能给错」：若真候选落在带下方超过 (一圈 − W) 处，它 +1 圈
+    // 后就能落进带，于是给出错答案。**容错余量 = 一圈 − W**，实测 20–37 ms，
+    // 即自标定的带必须把真值裹住到这个精度内。方向是反的——带越窄余量越大
+    // （弃权变多但更安全），所以下面取 100% 覆盖而不刻意放宽。
+    // 正确性靠的是实测：在旧路径本来就有唯一答案的地方，两者是否一致。
+    //
+    // **默认关闭**，BLINK_TAILBAND=1 开启。实测它收紧了 25.7 万个歧义段事例的
+    // 候选集、与 LIS 的指派逐个吻合，但**一个答案都没改**（4 小时 × 3 箱 × 1.85 亿
+    // 条事例逐字节一致）。零收益而有风险（下面的容错余量），所以只作为交叉校验
+    // 的工具保留，不进生产路径。
+    //
+    // 标定只用 Δstime==1 的 SEC 对：那里 total_ticks < PTIME_MOD，elapsed 唯一，
+    // 时间是确定的。Δstime>1 段本身就是待判对象，放进标定集会把错圈包的偏移
+    // 当成正常离散度，把带撑到两圈宽（2026-01-25T19 实测如此）。
+    // 只取快包：饱和段就是快包，慢包的带要宽几十 ms，跟余量同量级。
+    const TAIL_BAND_MAX_SPAN: i64 = 10_000; // 20 ms / 2 μs
+    let tail_band: Option<(f64, f64)> = {
+        let pmod_i = PTIME_MOD as i64;
+        let mut ws: Vec<f64> = Vec::new();
+        for wp in valid_indices.windows(2) {
+            let (s1, s2) = (&all_secs[wp[0]], &all_secs[wp[1]]);
+            if s2.stime as i64 - s1.stime as i64 != 1 {
+                continue;
+            }
+            let pt1 = s1.ptime as i64;
+            for pkt_idx in (s1.pkt_idx + 1)..s2.pkt_idx {
+                let evs = &parsed[pkt_idx];
+                if evs.is_empty() {
+                    continue;
+                }
+                let (mut lo, mut hi, mut ok) = (i64::MAX, i64::MIN, true);
+                for e in evs {
+                    let ef = (e.ptime as i64 - pt1).rem_euclid(pmod_i);
+                    if ef > TICKS_PER_SEC {
+                        ok = false;
+                        break;
+                    }
+                    lo = lo.min(ef);
+                    hi = hi.max(ef);
+                }
+                if !ok || hi - lo > TAIL_BAND_MAX_SPAN {
+                    continue;
+                }
+                let w = s1.met + hi as f64 * 2e-6 - get_utc_tail(&sci_data.ccsds[pkt_idx]);
+                if w > -10.0 && w < 10.0 {
+                    ws.push(w); // 带外的 0x7FFFFFFF 量级垃圾尾戳不进标定
+                }
+            }
+        }
+        if ws.len() < 1000 || std::env::var("BLINK_TAILBAND").is_err() {
+            None
+        } else {
+            ws.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let (lo, hi) = (ws[0], ws[ws.len() - 1]); // 不做分位裁剪：离群只会把带
+            if hi - lo < PMOD_SECS { // 撑宽 → 弃权，撑不窄 → 不会给错
+                Some((lo, hi))
+            } else {
+                None
+            }
+        }
+    };
+    if debug {
+        match tail_band {
+            Some((lo, hi)) => eprintln!(
+                "  尾戳带（Δstime=1 自标定）: [{:.4}, {:.4}] 宽 {:.4}s 余 {:+.1}ms",
+                lo, hi, hi - lo, (PMOD_SECS - (hi - lo)) * 1e3
+            ),
+            None if std::env::var("BLINK_TAILBAND").is_err() => {
+                eprintln!("  尾戳带：未启用（BLINK_TAILBAND=1 开启交叉校验）")
+            }
+            None => eprintln!("  尾戳带：标定样本不足或带宽于一圈 → 本箱本小时不用"),
+        }
+    }
+    let mut n_tail_pinned = 0u64;
+    let mut n_tail_abstain = 0u64;
+
     // 对每对相邻有效 SEC
     for w in valid_indices.windows(2) {
         let sec1 = &all_secs[w[0]];
@@ -442,7 +525,11 @@ pub fn reconstruct_with_wrap_tracking_labeled(
             pkt_idx: usize,
             local_idx: usize,
             elapsed_fwd: i64,  // mod PTIME_MOD
-            utc_max_elapsed: i64,  // UTC tail 约束：elapsed 上界
+            utc_max_elapsed: i64,  // UTC tail 约束：elapsed 上界（旧的单边松界）
+            // 尾戳带给出的双边界。带按「包末事例」标定，所以每个事例要把自己到
+            // 包末的已知间隔 delta 折进来。不可用时为 (i64::MIN, i64::MAX)。
+            tail_lo: i64,
+            tail_hi: i64,
         }
 
         let mut candidates: Vec<Candidate> = Vec::new();
@@ -471,10 +558,46 @@ pub fn reconstruct_with_wrap_tracking_labeled(
             }
             let start = if pkt_idx == pkt_a { evt_a + 1 } else { 0 };
             let end = if pkt_idx == pkt_b { evt_b } else { parsed[pkt_idx].len() };
+            // 本包的尾戳带：只给完整落在这一对 SEC 之间的快包。包内相对时间由
+            // ptime 差直接给出，不依赖圈数（包内跨度远小于一圈）。
+            let pm = PTIME_MOD as i64;
+            let pkt_band = tail_band.filter(|_| pkt_idx > pkt_a && pkt_idx < pkt_b).and_then(|(blo, bhi)| {
+                let evs = &parsed[pkt_idx];
+                let pt0 = evs.first()?.ptime as i64;
+                let span = evs.iter().map(|e| (e.ptime as i64 - pt0).rem_euclid(pm)).max()?;
+                if span > TAIL_BAND_MAX_SPAN {
+                    return None;
+                }
+                let tail = get_utc_tail(&sci_data.ccsds[pkt_idx]);
+                if (tail - sec1.met).abs() > 10.0 {
+                    return None; // 垃圾尾戳
+                }
+                // met_last − MET_CORRECTION = sec1.met + (e + delta) × 2μs ∈ [blo,bhi]+tail
+                Some((
+                    ((blo + tail - sec1.met) / 2e-6).floor() as i64,
+                    ((bhi + tail - sec1.met) / 2e-6).ceil() as i64,
+                    pt0,
+                    span,
+                ))
+            });
             for local_idx in start..end {
                 let pt = parsed[pkt_idx][local_idx].ptime as i64;
                 let elapsed_fwd = (pt - pt1).rem_euclid(PTIME_MOD as i64);
-                candidates.push(Candidate { pkt_idx, local_idx, elapsed_fwd, utc_max_elapsed: cached_utc_max });
+                let (tail_lo, tail_hi) = match pkt_band {
+                    Some((lo, hi, pt0, span)) => {
+                        let delta = span - (pt - pt0).rem_euclid(pm); // 到包末的间隔
+                        (lo - delta, hi - delta)
+                    }
+                    None => (i64::MIN, i64::MAX),
+                };
+                candidates.push(Candidate {
+                    pkt_idx,
+                    local_idx,
+                    elapsed_fwd,
+                    utc_max_elapsed: cached_utc_max,
+                    tail_lo,
+                    tail_hi,
+                });
             }
         }
 
@@ -967,6 +1090,23 @@ pub fn reconstruct_with_wrap_tracking_labeled(
                     .map(|w| c.elapsed_fwd + w * pmod)
                     .filter(|&e| e >= 0 && e <= total_ticks && e <= c.utc_max_elapsed)
                     .collect();
+                // 尾戳带收紧。带窄于一圈 ⇒ 至多留下一个候选；留下 0 个则弃权、
+                // 退回旧候选集（容错余量的讨论见带标定处）。
+                if cands.len() > 1 {
+                    let narrowed: Vec<i64> = cands
+                        .iter()
+                        .copied()
+                        .filter(|&e| e >= c.tail_lo && e <= c.tail_hi)
+                        .collect();
+                    if narrowed.is_empty() {
+                        n_tail_abstain += 1; // 真候选也在带外 → 弃权，退回旧候选集
+                    } else {
+                        if narrowed.len() < cands.len() {
+                            n_tail_pinned += 1;
+                        }
+                        cands = narrowed;
+                    }
+                }
                 cands.sort_unstable_by(|a, b| b.cmp(a)); // 降序
 
                 for elapsed in cands {
@@ -986,6 +1126,9 @@ pub fn reconstruct_with_wrap_tracking_labeled(
                 }
             }
 
+            // 「带是否裹住真值」只能实测，不能靠论证。做法是同一个二进制跑
+            // A/B：BLINK_NO_TAILBAND=1 关掉带、重建整小时事件流逐字节比对。
+            // 在带内做比对没有意义，因为 LIS 已经跑在收紧后的候选集上了。
             // 回溯标记 LIS 成员
             if !tails.is_empty() {
                 let mut idx = *tail_entry.last().unwrap();
@@ -1120,63 +1263,10 @@ pub fn reconstruct_with_wrap_tracking_labeled(
             "  ghosts: {} dead-zone + {} order-violation = {} total",
             n_ghost_deadzone, n_ghost_order, n_ghost_deadzone + n_ghost_order
         );
-        // 尾戳能否钉 wrap 整数：实测 u = (包内最早事例) − MET_CORRECTION − tail。
-        // 尾戳是打包那一整秒，事例必在打包之前 ⇒ u ∈ (−D, 1)，D = 排队 + 装包。
-        // 要唯一确定整圈数，窗宽 (1 + D) 必须 < 一圈 1.048576 s ⇒ **D < 48.6 ms**。
-        // 注意 result 里的时间已含 MET_CORRECTION(=4.0)，而 tail 在 stime+offset
-        // 标度上，必须先减掉，否则测出来整体偏 4 秒（吃过这个亏）。
-        // D 由装包时间主导，跟速率强相关，所以按包内跨度分层，只有高速率
-        // （= 真正需要钉圈数的饱和段）那一层说了算。
-        let mut layers: [(&str, Vec<f64>); 3] =
-            [("span<20ms", vec![]), ("20-200ms", vec![]), (">200ms", vec![])];
-        for (pkt_idx, times) in result.iter().enumerate() {
-            let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
-            for t in times {
-                if !t.is_nan() {
-                    lo = lo.min(*t);
-                    hi = hi.max(*t);
-                }
-            }
-            if !lo.is_finite() {
-                continue;
-            }
-            let tail = get_utc_tail(&sci_data.ccsds[pkt_idx]);
-            let u = lo - MET_CORRECTION - tail;
-            let span = hi - lo;
-            let k = if span < 0.020 {
-                0
-            } else if span < 0.200 {
-                1
-            } else {
-                2
-            };
-            layers[k].1.push(u);
-        }
-        for (name, v) in layers.iter_mut() {
-            if v.is_empty() {
-                continue;
-            }
-            v.sort_by(|a, b| a.partial_cmp(b).unwrap());
-            let q = |f: f64| v[((v.len() - 1) as f64 * f) as usize];
-            let n_bad = v.iter().filter(|x| **x < -10.0).count();
-            // 窗宽判据：去掉坏尾戳后，u 的全幅必须窄于一圈才可能唯一定圈
-            let good: Vec<f64> = v.iter().copied().filter(|x| *x >= -10.0).collect();
-            let span_all = good.last().unwrap_or(&0.0) - good.first().unwrap_or(&0.0);
-            let span_99 = q(0.99) - q(0.01);
-            eprintln!(
-                "  u=min_met-4-tail [{}]: n={} 坏尾戳 {} ({:.2}%) | med {:.4} p1 {:.4} p99 {:.4} \
-                 good_min {:.4} good_max {:.4} | 全幅 {:.4} p1-p99 {:.4} vs 一圈 1.048576 => {}",
-                name, v.len(), n_bad, 100.0 * n_bad as f64 / v.len() as f64,
-                q(0.5), q(0.01), q(0.99),
-                good.first().copied().unwrap_or(f64::NAN),
-                good.last().copied().unwrap_or(f64::NAN),
-                span_all, span_99,
-                if span_all < 1.048576 { "可钉" } else { "不可钉" }
-            );
-        }
         eprintln!(
-            "  unwrap: {} gaps solved by stream unwrapping, {} fell back",
-            n_unwrapped, n_unwrap_failed
+            "  unwrap: {} gaps solved by stream unwrapping, {} fell back; \
+             尾戳带收紧 {} 个事例、弃权 {} 个",
+            n_unwrapped, n_unwrap_failed, n_tail_pinned, n_tail_abstain
         );
         eprintln!(
             "STEP4 single-anchor edges: {} leading + {} trailing = {} events resolved, {} rejected by UTC gate",
