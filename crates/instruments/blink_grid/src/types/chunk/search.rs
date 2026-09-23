@@ -77,6 +77,28 @@ const TICK_S: f64 = 1.0 / 4_194_304.0;
 /// 天格每颗星 4 路探头
 const N_DETECTORS: usize = 4;
 
+/// 片上标定脉冲的周期（tick）。GRID-03B 2022-03-19 一次过境上按脉冲序号线性回归得到
+/// 4194.7672 tick = 1.000110 ms；2022-05、2023-08、2023-11 的脉冲窗用同一个值，相邻
+/// 簇间隔落在梳齿上的占比 0.995–0.998。见 `evidence/grid03b/why-grid03b.md` 第 15 节。
+const PULSER_PERIOD_TICKS: f64 = 4194.7672;
+/// 梳齿容差（tick）：时戳量化把相邻间隔打散成 4194 与 4195 两档。
+const PULSER_TOLERANCE_TICKS: f64 = 1.0;
+/// 数到第几次谐波：漏掉若干发脉冲的间隔落在整数倍齿上。
+const PULSER_MAX_HARMONIC: f64 = 29.0;
+/// 判"脉冲开着"：本底窗里 ≥3 重簇至少这么多个，且相邻间隔落在梳齿上的占比超过
+/// `PULSER_COMB_FRACTION`。
+///
+/// 脉冲 1 kHz、一发点亮四路，单独就能凑满 `min_number = 8`（一发 4 个计数，两发或一发
+/// 加 4 个本底），而它的簇率又把 λ₃ 抬高、让粒子检验自己让路——v12 回归 39 天里有 3 个
+/// 显著候选就是这样过来的。回归日 33 个显著候选的 ±2 s 实测分两群，中间是空的：脉冲窗
+/// 3349–3791 个簇、梳齿占比 0.995–0.998；其余 ≤ 13 个簇、占比 0.000（含 7 个闪电认证）。
+/// ±0.5 s 窗里脉冲约 900 个、天然本底约 1 个，两个阈都离两群很远。
+///
+/// 这里只否决候选；脉冲开着的那几段本该整段算作非观测时段（全任务 5% 的过境），曝光
+/// 暂未扣，见 `OPEN-QUESTIONS.md`。
+const PULSER_MIN_CLUSTERS: usize = 20;
+const PULSER_COMB_FRACTION: f64 = 0.5;
+
 /// 本底窗 `[from, to]`（已夹到候选所在的 GTI 段内）里是否有读出空洞。
 ///
 /// `events` 已按时间排好。空段包括窗口两端到最近事例的距离——窗口已夹在
@@ -123,6 +145,37 @@ fn slice_between<S: Satellite>(events: &[Event<S>], from: f64, to: f64) -> &[Eve
     let lo = events.partition_point(|e| e.time().met() < from);
     let hi = events.partition_point(|e| e.time().met() <= to);
     &events[lo..hi.max(lo)]
+}
+
+/// 本底窗里片上标定脉冲是否开着，见 `PULSER_MIN_CLUSTERS`。
+fn pulser_on<S: Satellite>(events: &[Event<S>], from: f64, to: f64) -> bool {
+    let window = slice_between(events, from, to);
+    let mut clusters: Vec<f64> = Vec::new();
+    let mut run = 1usize;
+    for i in 1..=window.len() {
+        if i < window.len() && window[i].time() == window[i - 1].time() {
+            run += 1;
+        } else {
+            if run >= TRIPLE {
+                // 时刻严格落在 2⁻²² s 栅格上，换成 tick 取整无损
+                clusters.push((window[i - 1].time().met() / TICK_S).round());
+            }
+            run = 1;
+        }
+    }
+    if clusters.len() < PULSER_MIN_CLUSTERS {
+        return false;
+    }
+    let on_comb = clusters
+        .windows(2)
+        .filter(|w| {
+            let d = w[1] - w[0];
+            let k = (d / PULSER_PERIOD_TICKS).round();
+            (1.0..=PULSER_MAX_HARMONIC).contains(&k)
+                && (d - k * PULSER_PERIOD_TICKS).abs() <= PULSER_TOLERANCE_TICKS
+        })
+        .count();
+    on_comb as f64 / (clusters.len() - 1) as f64 > PULSER_COMB_FRACTION
 }
 
 /// 量化偶然的三重簇期望（逐探头口径），见 `MAX_TRIPLE_P`。
@@ -277,6 +330,7 @@ pub(super) fn search<S: Satellite>(chunk: &Chunk<S>) -> Vec<Signal<Event<S>>> {
     let mut n_simultaneous = 0usize;
     let mut n_no_attitude = 0usize;
     let mut n_single_detector = 0usize;
+    let mut n_pulser = 0usize;
     let half_neighbor = 0.5_f64;
     let signals = results
         .into_iter()
@@ -329,6 +383,12 @@ pub(super) fn search<S: Satellite>(chunk: &Chunk<S>) -> Vec<Signal<Event<S>>> {
             // 的簇，单独用它常常是 0，λ₃ 被压低就偏向误杀；取大者只会让门更难触发。
             let best_start = candidate.start + candidate.delay;
             let best_stop = best_start + candidate.bin_size_best;
+            // 片上标定脉冲开着时，窗里的同戳簇是脉冲不是粒子，下面的泊松检验把它当本底
+            // 会自己让路，所以先单独判掉。
+            if !S::SHARED_FRAME && pulser_on(&events, from, to) {
+                n_pulser += 1;
+                return None;
+            }
             if !S::SHARED_FRAME {
                 let local = {
                     let all = triple_clusters(slice_between(&events, from, to));
@@ -425,6 +485,7 @@ pub(super) fn search<S: Satellite>(chunk: &Chunk<S>) -> Vec<Signal<Event<S>>> {
     chunk
         .dropped_single_detector
         .store(n_single_detector, Ordering::Relaxed);
+    chunk.dropped_pulser.store(n_pulser, Ordering::Relaxed);
     signals
 }
 
@@ -596,6 +657,49 @@ mod tests {
         assert!((poisson_tail(5, lam) / want - 1.0).abs() < 1e-3);
         assert_eq!(poisson_tail(0, lam), 1.0);
         assert!((poisson_tail(1, 2.0) - (1.0 - (-2.0f64).exp())).abs() < 1e-12);
+    }
+
+    /// 1 kHz 脉冲串（每发四路同戳）+ 零星本底，时刻落在 2⁻²² s 栅格上
+    fn pulser_train(from: f64, n: usize, missing_every: usize) -> Vec<Event<Sat03B>> {
+        let mut v = Vec::new();
+        for i in 0..n {
+            if missing_every > 0 && i % missing_every == 3 {
+                continue;
+            }
+            let tick = (from / TICK_S).round() + (i as f64 * PULSER_PERIOD_TICKS).round();
+            v.extend((0..4).map(|d| (tick * TICK_S, d as u8)));
+        }
+        for i in 0..200 {
+            v.push((from + 0.0013 + i as f64 * 0.004_97, (i % 4) as u8));
+        }
+        v.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        on_detectors(&v)
+    }
+
+    #[test]
+    fn a_pulser_train_is_recognised_even_with_missed_pulses() {
+        let events = pulser_train(100.0, 1000, 7);
+        assert!(pulser_on(&events, 100.0, 101.0));
+    }
+
+    #[test]
+    fn scattered_particles_are_not_a_pulser() {
+        // 30 次四路穿越、间隔不规则：簇够多，但不在梳齿上
+        let mut v = Vec::new();
+        for i in 0..30 {
+            let t = 100.0 + 0.0317 * i as f64 + 0.0011 * ((i * i) % 7) as f64;
+            let t = (t / TICK_S).round() * TICK_S;
+            v.extend((0..4).map(|d| (t, d as u8)));
+        }
+        v.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        assert!(!pulser_on(&on_detectors(&v), 100.0, 101.0));
+    }
+
+    #[test]
+    fn a_quiet_window_is_not_a_pulser() {
+        // 天然本底里 ±0.5 s 只有一两个簇，够不着簇数下限
+        let events = pulser_train(100.0, 3, 0);
+        assert!(!pulser_on(&events, 100.0, 101.0));
     }
 
     #[test]

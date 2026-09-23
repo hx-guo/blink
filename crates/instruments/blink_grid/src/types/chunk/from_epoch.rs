@@ -112,6 +112,7 @@ pub(super) fn from_epoch<S: Satellite>(epoch: &DateTime<Utc>) -> Result<Chunk<S>
         dropped_simultaneous: Default::default(),
         without_attitude: Default::default(),
         dropped_single_detector: Default::default(),
+        dropped_pulser: Default::default(),
         posatt_unreadable,
         posatt_positions_ignored,
         _satellite: PhantomData,

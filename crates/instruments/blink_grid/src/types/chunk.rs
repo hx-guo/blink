@@ -39,6 +39,8 @@ pub struct Chunk<S: Satellite> {
     pub(super) without_attitude: AtomicUsize,
     /// 候选窗里单路探测器占比过高（单路毛刺）而被否决的候选数，见 `search`
     pub(super) dropped_single_detector: AtomicUsize,
+    /// 本底窗里片上标定脉冲开着而被否决的候选数，见 `search`
+    pub(super) dropped_pulser: AtomicUsize,
     /// 读不出来（如 0 字节）而跳过的位姿文件数
     pub(super) posatt_unreadable: usize,
     /// 位置解在黑名单上被抹掉的位姿文件数（见 `io::orbit_fit::posatt_blacklisted`）
@@ -140,6 +142,10 @@ impl<S: Satellite> blink_core::traits::Chunk for Chunk<S> {
         let single = self.dropped_single_detector.load(Ordering::Relaxed);
         if single > 0 {
             d.push(("dropped_single_detector", single as f64));
+        }
+        let pulser = self.dropped_pulser.load(Ordering::Relaxed);
+        if pulser > 0 {
+            d.push(("dropped_pulser", pulser as f64));
         }
         d
     }
