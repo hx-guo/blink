@@ -10,26 +10,36 @@ use crate::io::posatt::{attitude_trajectory, interpolate_sampled, position_traje
 use crate::types::Event;
 use crate::types::instrument::{Grid, Satellite};
 
-/// 判为"读出空洞"的门槛：本底窗里最长的空段在本地速率下应有的计数 r·L。
+/// 读出空洞否决：本底窗里最长的空段，在窗内实际计数率下出现的概率低于这个值就否决。
 ///
-/// 天格的读出在高计数率下会成帧丢数：辐射带里（|lat| > 40°，5–75 kc/s）事例
-/// 以 5–16 ms 的密集帧到达，帧间 3–12 ms 一个事例都没有，四个探测器同步。
-/// 搜索窗落在帧内、本底窗横跨帧和空洞，均值被帧间空洞拉低，帧内的普通计数
-/// 就成了 fa=1e-199 的"暴发"——GRID-03B 一天 9213 个候选全是这种。实测
-/// 2–15 kc/s 的秒空洞占比中位 0.0–0.7%，安静时段一天搜不出任何候选，所以
-/// 只在本底窗里出现统计上不可能的空段时否决：r·L > 9.2 即 P(0) < 1e-4。
-/// 在 1 kc/s 要 9 ms 的空段才触发（一个本底窗里约百次机会，误否决期望 1%），
-/// 在 13 kc/s 只要 0.7 ms。全量首跑用 14（P<1e-6）时，辐射带 10–17 kc/s 的
-/// 帧边界（空段接近 1 ms）漏了一批，幸存的显著候选一半仍在 |lat| ≥ 40°。
+/// **要防的是什么。** 候选窗落在有数据的一段里，本底窗里却夹着数据没记下来的时间，
+/// 本底被拉低，普通计数就成了"暴发"。天格有两种丢法，在数据里都表现为泊松涨落解释
+/// 不了的空白（2026-09-27 实测，`OPEN-QUESTIONS.md` 未决项 23）：
 ///
-/// 速率 r 取本底窗速率与整次过境速率中的大者：成片丢数时窗内速率本身被压到
-/// 几个 c/s（GRID-04 有 count=8、mean=0.00、率 2 c/s 的"候选"），按窗内速率
-/// 算 r·L 永远到不了门槛，按过境速率算半秒空段就是几百。
+/// 1. **高计数率下缓冲区按个数装满就停**：03B 每 1260 个事例停约 4 ms 的整数倍、每
+///    20160 个停约 340 ms，约 100 kc/s 以上出现；02/04/07 每帧 352 个，几千 c/s 起，
+///    计数率越高每秒交出的帧越少。全在辐射带里。
+/// 2. **03B 四路恰好同时丢包**：03B 每路 20 个事例一包，约 3% 的包没有到手；单路丢包
+///    时其余三路照常，四路合计里只是计数率少 1/4，不构成空白，这里不管；四路同时丢
+///    才留下几百毫秒的空白，约 1% 的本底窗。
 ///
-/// 更正的做法是把空洞当 GTI 缺口、让本底按真实活时间归一，但 `search_new`
-/// 的活时间夹取假设候选所在的一段 GTI 覆盖整个本底窗，毫秒级的洞会把本底窗
-/// 夹到一帧里去，统计反而更差。见 `OPEN-QUESTIONS.md`。
-const DEAD_GAP_EXPECTED_COUNTS: f64 = 9.2;
+/// **计数率怎么估：`r = ln2 / 窗内相邻间隔的中位数`。** 泊松过程的间隔中位数是 ln2/r；
+/// 丢数时绝大多数间隔落在有数据的段里，中位数反映的是有数据时的真实计数率，不被空白
+/// 拉低，也不被几百秒外的辐射带抬高。候选窗本身的间隔不计入，免得暴发把 r 抬高。
+///
+/// **阈怎么定：按整个窗里"最长的那个空段"算概率。** 窗里 n 个间隔（含两端到窗边）中
+/// 最长的一个 ≥ L 的概率是 `1 − (1 − e^{−rL})^n`，小于 `DEAD_GAP_ALPHA` 即否决——每个
+/// 窗的纯统计误砍固定在 α 量级，不随计数率与窗内事例数变化。
+///
+/// **旧判据（v10–v14）错在哪。** 旧的是 `max(窗内率, 整次过境率) · L > 9.2`：9.2 是单个
+/// 间隔的 1e-4，一个窗里几百到上千个间隔合起来误砍 4–10%；更糟的是过境一旦经过辐射带，
+/// 过境平均率被抬高几倍，低纬正常本底里的普通涨落也触发——随机取的 6.8 万个安静窗里
+/// 误砍 43%（03B），另外三星 24–49%。
+///
+/// **实测（四星各 18 天，同一批窗）**：以读出缓冲的帧大小作独立标签的丢数窗，检出
+/// 99.6–99.9%（旧 99.9–100%）；安静窗触发 0.9–1.6%（旧 24–49%），其中 P < 1e-12 的
+/// 是真空白（四路同时丢包、MCU 星上被压低的成帧段），贴着阈值的纯统计误砍约 0.2%。
+const DEAD_GAP_ALPHA: f64 = 1e-3;
 
 /// 读出可信的计数率上限（四路合计，c/s）。
 ///
@@ -109,29 +119,48 @@ const PULSER_MAX_HARMONIC: f64 = 29.0;
 const PULSER_MIN_CLUSTERS: usize = 20;
 const PULSER_COMB_FRACTION: f64 = 0.5;
 
-/// 本底窗 `[from, to]`（已夹到候选所在的 GTI 段内）里是否有读出空洞。
+/// 本底窗 `[from, to]`（已夹到候选所在的 GTI 段内）里是否有读出空洞，见 `DEAD_GAP_ALPHA`。
 ///
-/// `events` 已按时间排好。空段包括窗口两端到最近事例的距离——窗口已夹在
-/// GTI 内，端点上没有事例不是过境边界造成的。
-fn has_dead_gap<S: Satellite>(events: &[Event<S>], from: f64, to: f64, pass_rate: f64) -> bool {
+/// `events` 已按时间排好。空段包括窗口两端到最近事例的距离——窗口已夹在 GTI 内，端点上
+/// 没有事例不是过境边界造成的。`[cs, ce]` 是候选窗，估计数率时它内部的间隔不计入。
+fn has_dead_gap<S: Satellite>(events: &[Event<S>], from: f64, to: f64, cs: f64, ce: f64) -> bool {
     if to <= from {
         return false;
     }
     let lo = events.partition_point(|e| e.time().met() < from);
     let hi = events.partition_point(|e| e.time().met() <= to);
     let window = &events[lo..hi];
-    let longest = if window.is_empty() {
-        to - from
-    } else {
-        let mut longest =
-            (window[0].time().met() - from).max(to - window[window.len() - 1].time().met());
-        for pair in window.windows(2) {
-            longest = longest.max(pair[1].time().met() - pair[0].time().met());
+    if window.len() < 3 {
+        // 候选自身就有 ≥ 8 个事例落在窗里，到不了这里；真到了就是整窗几乎空白
+        return true;
+    }
+    let first = window[0].time().met();
+    let last = window[window.len() - 1].time().met();
+    let mut longest = (first - from).max(to - last);
+    let mut intervals: Vec<f64> = Vec::with_capacity(window.len());
+    for pair in window.windows(2) {
+        let (a, b) = (pair[0].time().met(), pair[1].time().met());
+        longest = longest.max(b - a);
+        if !(a >= cs && b <= ce) {
+            intervals.push(b - a);
         }
-        longest
-    };
-    let rate = (window.len() as f64 / (to - from)).max(pass_rate);
-    rate * longest > DEAD_GAP_EXPECTED_COUNTS
+    }
+    if intervals.is_empty() {
+        return true;
+    }
+    let mid = intervals.len() / 2;
+    let median = *intervals
+        .select_nth_unstable_by(mid, |x, y| x.partial_cmp(y).unwrap())
+        .1;
+    if median <= 0.0 {
+        // 一半以上的间隔为零只可能是成帧读出里的同戳，不是空洞的判据能管的
+        return false;
+    }
+    let rate = std::f64::consts::LN_2 / median;
+    // n 个间隔（含两端）里最长的 ≥ L 的概率：1 − (1 − e^{−rL})^n
+    let n = (window.len() + 1) as f64;
+    let p_longest = -(n * (-(-rate * longest).exp()).ln_1p()).exp_m1();
+    p_longest < DEAD_GAP_ALPHA
 }
 
 /// `events[lo..hi]` 里重数 ≥3 的同戳簇个数。时间戳相同的事例必然相邻，扫一遍分段即可。
@@ -372,7 +401,7 @@ pub(super) fn search<S: Satellite>(chunk: &Chunk<S>) -> Vec<Signal<Event<S>>> {
                 ),
                 None => (cs - half_neighbor, ce + half_neighbor),
             };
-            // 过境速率：准入后的事例数 / 过境时长
+            // 过境速率：准入后的事例数 / 过境时长。现在只给计数率上限用（未决项 23 的后续）
             let pass_rate = chunk
                 .passes
                 .iter()
@@ -383,7 +412,7 @@ pub(super) fn search<S: Satellite>(chunk: &Chunk<S>) -> Vec<Signal<Event<S>>> {
                     (b - a) as f64 / (p.stop - p.start).max(1e-9)
                 })
                 .unwrap_or(0.0);
-            if has_dead_gap(&events, from, to, pass_rate) {
+            if has_dead_gap(&events, from, to, cs, ce) {
                 n_dead_gap += 1;
                 return None;
             }
@@ -769,58 +798,120 @@ mod tests {
         assert!(crate::types::Sat07::SHARED_FRAME);
     }
 
+    fn gap(times: &[f64]) -> bool {
+        has_dead_gap(&at(times), 100.0, 101.0, -1.0, -1.0)
+    }
+
+    /// 可复现的泊松本底：splitmix64 生成均匀数，指数间隔。（xorshift 在小种子上头几个
+    /// 输出很差，会造出一个特别长的首间隔、被当成窗口开头的空白。）
+    fn poisson_stream(rate: f64, from: f64, to: f64, seed: u64) -> Vec<f64> {
+        let mut x = seed;
+        let mut t = from;
+        let mut out = Vec::new();
+        loop {
+            x = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
+            let mut z = x;
+            z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+            z ^= z >> 31;
+            let u = ((z >> 11) as f64 + 0.5) / (1u64 << 53) as f64;
+            t += -u.ln() / rate;
+            if t > to {
+                return out;
+            }
+            out.push(t);
+        }
+    }
+
     #[test]
     fn a_uniform_stream_has_no_dead_gap() {
-        // 2000 c/s 均匀铺满 1 s：最长空段 0.5 ms，r·L = 1
-        let events = at(&(0..2000)
-            .map(|i| 100.0 + i as f64 * 5e-4)
-            .collect::<Vec<_>>());
-        assert!(!has_dead_gap(&events, 100.0, 101.0, 2000.0));
+        let times: Vec<f64> = (0..2000).map(|i| 100.0 + i as f64 * 5e-4).collect();
+        assert!(!gap(&times));
     }
 
     #[test]
     fn a_frame_gap_at_high_rate_is_a_dead_gap() {
-        // 帧结构：每 10 ms 前 5 ms 有 75 kc/s 的事例，后 5 ms 全空——r·L ≈ 37500×0.005 = 187
+        // 帧结构：每 10 ms 前 5 ms 有 75 kc/s 的事例，后 5 ms 全空
         let mut times = Vec::new();
         for frame in 0..100 {
             let t0 = 100.0 + frame as f64 * 0.01;
             times.extend((0..375).map(|i| t0 + i as f64 * 5e-3 / 375.0));
         }
-        assert!(has_dead_gap(&at(&times), 100.0, 101.0, 37500.0));
+        assert!(gap(&times));
     }
 
     #[test]
     fn a_long_but_poisson_plausible_gap_at_low_rate_is_not_a_dead_gap() {
-        // 300 c/s，最长空段 20 ms：r·L = 6，P(0) = 2.5e-3，不能算读出空洞
+        // 300 c/s，挖掉 20 ms：一个 1 s 窗里 300 个间隔，最长的到 20 ms 并不稀奇
         let mut times: Vec<f64> = (0..300).map(|i| 100.0 + i as f64 / 300.0).collect();
         times.retain(|t| !(100.50..100.52).contains(t));
-        assert!(!has_dead_gap(&at(&times), 100.0, 101.0, 300.0));
+        assert!(!gap(&times));
+    }
+
+    #[test]
+    fn a_lost_packet_on_all_four_detectors_is_a_dead_gap() {
+        // 400 c/s 的本底里四路同时丢了 300 ms（03B 四路同时丢包的典型长度）
+        let mut times = poisson_stream(400.0, 100.0, 101.0, 7);
+        times.retain(|t| !(100.40..100.70).contains(t));
+        assert!(gap(&times));
     }
 
     #[test]
     fn the_window_edges_count_as_gaps() {
-        // 窗口前 200 ms 一个事例都没有，之后 5 kc/s：r·L = 4000×0.2 = 800
-        let events = at(&(0..4000)
-            .map(|i| 100.2 + i as f64 * 2e-4)
-            .collect::<Vec<_>>());
-        assert!(has_dead_gap(&events, 100.0, 101.0, 2000.0));
+        // 窗口前 200 ms 一个事例都没有，之后 5 kc/s
+        let times: Vec<f64> = (0..4000).map(|i| 100.2 + i as f64 * 2e-4).collect();
+        assert!(gap(&times));
     }
 
     #[test]
-    fn a_nearly_empty_window_is_judged_by_the_pass_rate() {
-        // 窗里只有 8 个事例挤在 1 ms 内（窗内速率 8 c/s），但整次过境是 1 kc/s：
-        // 半秒的空段按过境速率是 500 个期望计数——这是成片丢数里的孤帧，不是暴发
-        let events = at(&(0..8).map(|i| 100.5 + i as f64 * 1e-4).collect::<Vec<_>>());
-        assert!(has_dead_gap(&events, 100.0, 101.0, 1000.0));
-        // 同样的 8 个事例，如果整次过境本来就只有 8 c/s，那半秒空段是正常的
-        assert!(!has_dead_gap(&events, 100.0, 101.0, 8.0));
+    fn an_isolated_frame_is_caught_without_the_pass_rate() {
+        // 成片丢数里的孤帧：窗里只有 8 个事例挤在 1 ms 内。旧判据要靠整次过境率才抓得到；
+        // 按间隔中位数估的计数率是帧内的 7 kc/s，半秒空白一看就不是涨落
+        let times: Vec<f64> = (0..8).map(|i| 100.5 + i as f64 * 1e-4).collect();
+        assert!(gap(&times));
     }
 
     #[test]
-    fn a_millisecond_frame_edge_at_belt_rates_is_caught() {
-        // 13 kc/s 的帧边界留 0.9 ms 空段：r·L = 11.7，P(0) = 8e-6——用 1e-6 的门槛会漏
+    fn a_passing_radiation_belt_does_not_raise_the_rate() {
+        // 旧判据的毛病：过境平均率被辐射带抬到 1134 c/s 时，387 c/s 的正常本底有四成的窗
+        // 被砍。新判据只看窗内，不存在这个输入
+        let mut fired = 0;
+        for seed in 1..=400u64 {
+            let times = poisson_stream(387.0, 100.0, 101.0, seed * 7919);
+            if gap(&times) {
+                fired += 1;
+            }
+        }
+        // 设计误砍 α = 1e-3；间隔中位数有抖动，400 个窗里允许到 4 个
+        assert!(fired <= 4, "fired {fired}/400");
+    }
+
+    #[test]
+    fn the_burst_itself_does_not_raise_the_rate() {
+        // 200 c/s 本底里一个 20 计数 / 80 µs 的暴。暴内间隔计入中位数会把 r 抬高、
+        // 让普通涨落更容易被判成空洞；排除候选窗后结果与没有暴时一致
+        let mut times = poisson_stream(200.0, 100.0, 101.0, 3);
+        let burst: Vec<f64> = (0..20).map(|i| 100.5 + i as f64 * 4e-6).collect();
+        times.extend(&burst);
+        times.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let events = at(&times);
+        let with = has_dead_gap(&events, 100.0, 101.0, 100.5, 100.5 + 80e-6);
+        let without = has_dead_gap(
+            &at(&poisson_stream(200.0, 100.0, 101.0, 3)),
+            100.0,
+            101.0,
+            -1.0,
+            -1.0,
+        );
+        assert_eq!(with, without);
+    }
+
+    #[test]
+    fn a_millisecond_gap_at_belt_rates_is_left_to_the_rate_ceiling() {
+        // 13 kc/s 均匀流里 0.9 ms 的空段：1 s 里 13000 个间隔，最长的到 0.9 ms 统计上并不稀奇。
+        // 旧判据会砍它；那一带的候选由 RATE_CEILING（5 kc/s）挡掉，不靠这道门
         let mut times: Vec<f64> = (0..13000).map(|i| 100.0 + i as f64 / 13000.0).collect();
         times.retain(|t| !(100.5000..100.5009).contains(t));
-        assert!(has_dead_gap(&at(&times), 100.0, 101.0, 13000.0));
+        assert!(!gap(&times));
     }
 }
