@@ -41,15 +41,11 @@ use crate::types::instrument::{Grid, Satellite};
 /// 是真空白（四路同时丢包、MCU 星上被压低的成帧段），贴着阈值的纯统计误砍约 0.2%。
 const DEAD_GAP_ALPHA: f64 = 1e-3;
 
-/// 读出可信的计数率上限（四路合计，c/s）。
-///
-/// 成帧丢数从这个量级开始：GRID-02 与 04 在 5 kc/s 附近就成片出现空洞，03B
-/// 到 15 kc/s 才成片，但 13 kc/s 时已经有另一种形态——四路同时一个 1 ms 的
-/// 尖峰（86 个对本底 4 个/ms）后面跟几毫秒的稀疏，合并四路后最长空段只有
-/// 0.6 ms，空洞判据抓不到。全量首跑显著候选的一半落在 |lat| ≥ 40° 的高速率
-/// 区，本底率中位 5.4 kc/s；加这道门后 |lat| < 40° 的显著候选一个不少
-/// （03B 277/277），失去的只有辐射带。取本底窗速率与过境速率中的大者比较。
-const RATE_CEILING: f64 = 5000.0;
+// 计数率上限（v10–v15 的 RATE_CEILING = 5000 c/s，取本底窗率与整次过境率的大者）已删除
+// （2026-09-27）。本底高本身不造假信号——泊松检验已按本底算显著性；这道门是"读出坏了"的
+// 替代指标，而读出坏了的直接判据（空白）已由 `has_dead_gap` 按实测验证过。它还和旧空洞门一样
+// 用了整次过境率，经过辐射带的过境里低纬安静段也被砍。去掉后高纬、高本底的事件会进候选，
+// 由下游按时长、能谱、位置分类。见 `OPEN-QUESTIONS.md` 未决项 24。
 
 /// 带电粒子否决：最显著一格里 ≥3 重同戳簇的个数 k₃ 与它的偶然期望 λ₃ 做泊松检验，
 /// `P(K₃ ≥ k₃ | SAFETY·λ₃) < MAX_TRIPLE_P` 即否决。
@@ -391,7 +387,6 @@ pub(super) fn search<S: Satellite>(chunk: &Chunk<S>) -> Vec<Signal<Event<S>>> {
     let mut n_dropped = 0usize;
     let mut n_fitted = 0usize;
     let mut n_dead_gap = 0usize;
-    let mut n_high_rate = 0usize;
     let mut n_simultaneous = 0usize;
     let mut n_no_attitude = 0usize;
     let mut n_single_detector = 0usize;
@@ -411,28 +406,8 @@ pub(super) fn search<S: Satellite>(chunk: &Chunk<S>) -> Vec<Signal<Event<S>>> {
                 ),
                 None => (cs - half_neighbor, ce + half_neighbor),
             };
-            // 过境速率：准入后的事例数 / 过境时长。现在只给计数率上限用（未决项 23 的后续）
-            let pass_rate = chunk
-                .passes
-                .iter()
-                .find(|p| cs >= p.start && cs <= p.stop)
-                .map(|p| {
-                    let a = events.partition_point(|e| e.time().met() < p.start);
-                    let b = events.partition_point(|e| e.time().met() <= p.stop);
-                    (b - a) as f64 / (p.stop - p.start).max(1e-9)
-                })
-                .unwrap_or(0.0);
             if has_dead_gap(&events, from, to, cs, ce) {
                 n_dead_gap += 1;
-                return None;
-            }
-            let window_rate = {
-                let a = events.partition_point(|e| e.time().met() < from);
-                let b = events.partition_point(|e| e.time().met() <= to);
-                (b - a) as f64 / (to - from).max(1e-9)
-            };
-            if window_rate.max(pass_rate) > RATE_CEILING {
-                n_high_rate += 1;
                 return None;
             }
             // 带电粒子否决看最显著的那一格：由 start 偏移 delay 得到，两者都是
@@ -545,9 +520,6 @@ pub(super) fn search<S: Satellite>(chunk: &Chunk<S>) -> Vec<Signal<Event<S>>> {
         .store(n_fitted, Ordering::Relaxed);
     chunk.events_outside_gti.store(n_outside, Ordering::Relaxed);
     chunk.dropped_dead_gap.store(n_dead_gap, Ordering::Relaxed);
-    chunk
-        .dropped_high_rate
-        .store(n_high_rate, Ordering::Relaxed);
     chunk
         .dropped_simultaneous
         .store(n_simultaneous, Ordering::Relaxed);
@@ -945,9 +917,9 @@ mod tests {
     }
 
     #[test]
-    fn a_millisecond_gap_at_belt_rates_is_left_to_the_rate_ceiling() {
+    fn a_millisecond_gap_at_belt_rates_is_a_normal_fluctuation() {
         // 13 kc/s 均匀流里 0.9 ms 的空段：1 s 里 13000 个间隔，最长的到 0.9 ms 统计上并不稀奇。
-        // 旧判据会砍它；那一带的候选由 RATE_CEILING（5 kc/s）挡掉，不靠这道门
+        // 旧判据会砍它。0.9 ms 的空段在这里本来就是正常涨落
         let mut times: Vec<f64> = (0..13000).map(|i| 100.0 + i as f64 / 13000.0).collect();
         times.retain(|t| !(100.5000..100.5009).contains(t));
         assert!(!gap(&times));
