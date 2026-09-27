@@ -122,43 +122,53 @@ const PULSER_COMB_FRACTION: f64 = 0.5;
 /// 本底窗 `[from, to]`（已夹到候选所在的 GTI 段内）里是否有读出空洞，见 `DEAD_GAP_ALPHA`。
 ///
 /// `events` 已按时间排好。空段包括窗口两端到最近事例的距离——窗口已夹在 GTI 内，端点上
-/// 没有事例不是过境边界造成的。`[cs, ce]` 是候选窗，估计数率时它内部的间隔不计入。
+/// 没有事例不是过境边界造成的。
+///
+/// **按不同的时戳算，不按事例算。** 空洞问的是"有没有一段时间读出什么都没有"，单位是
+/// 读出发生的时刻。共帧星（02/04/07）一帧里几路共用触发那一击的时戳，成帧时一半以上的
+/// 相邻间隔是 0，按事例算中位数就是 0、计数率无从估计——第一版在这里直接放行，让 MCU 星
+/// 的成帧段整个绕过了这道门（回归日 GRID-07 2024-03-15 多出 10 个显著的孤帧）。
+///
+/// **候选窗 `[cs, ce]` 的间隔只在它占窗内不到一半时才排除。** 排除是为了不让亮暴发把
+/// 计数率抬高；但成帧丢数里的孤帧整个就是候选（本底窗 352 个时戳里 348–350 个在候选窗内），
+/// 排除后只剩一两个跨过空白的长间隔，计数率被估成几 c/s，空白反倒显得正常。
 fn has_dead_gap<S: Satellite>(events: &[Event<S>], from: f64, to: f64, cs: f64, ce: f64) -> bool {
     if to <= from {
         return false;
     }
     let lo = events.partition_point(|e| e.time().met() < from);
     let hi = events.partition_point(|e| e.time().met() <= to);
-    let window = &events[lo..hi];
-    if window.len() < 3 {
-        // 候选自身就有 ≥ 8 个事例落在窗里，到不了这里；真到了就是整窗几乎空白
+    let mut stamps: Vec<f64> = events[lo..hi].iter().map(|e| e.time().met()).collect();
+    stamps.dedup();
+    if stamps.len() < 3 {
+        // 候选自身就有 ≥ 8 个事例落在窗里；到这里是整窗几乎只有一两个读出时刻
         return true;
     }
-    let first = window[0].time().met();
-    let last = window[window.len() - 1].time().met();
+    let first = stamps[0];
+    let last = stamps[stamps.len() - 1];
     let mut longest = (first - from).max(to - last);
-    let mut intervals: Vec<f64> = Vec::with_capacity(window.len());
-    for pair in window.windows(2) {
-        let (a, b) = (pair[0].time().met(), pair[1].time().met());
+    let mut all: Vec<f64> = Vec::with_capacity(stamps.len());
+    let mut outside: Vec<f64> = Vec::with_capacity(stamps.len());
+    for pair in stamps.windows(2) {
+        let (a, b) = (pair[0], pair[1]);
         longest = longest.max(b - a);
+        all.push(b - a);
         if !(a >= cs && b <= ce) {
-            intervals.push(b - a);
+            outside.push(b - a);
         }
     }
-    if intervals.is_empty() {
-        return true;
-    }
+    let intervals = if 2 * outside.len() > all.len() {
+        &mut outside
+    } else {
+        &mut all
+    };
     let mid = intervals.len() / 2;
     let median = *intervals
         .select_nth_unstable_by(mid, |x, y| x.partial_cmp(y).unwrap())
         .1;
-    if median <= 0.0 {
-        // 一半以上的间隔为零只可能是成帧读出里的同戳，不是空洞的判据能管的
-        return false;
-    }
     let rate = std::f64::consts::LN_2 / median;
     // n 个间隔（含两端）里最长的 ≥ L 的概率：1 − (1 − e^{−rL})^n
-    let n = (window.len() + 1) as f64;
+    let n = (stamps.len() + 1) as f64;
     let p_longest = -(n * (-(-rate * longest).exp()).ln_1p()).exp_m1();
     p_longest < DEAD_GAP_ALPHA
 }
@@ -869,6 +879,34 @@ mod tests {
         // 按间隔中位数估的计数率是帧内的 7 kc/s，半秒空白一看就不是涨落
         let times: Vec<f64> = (0..8).map(|i| 100.5 + i as f64 * 1e-4).collect();
         assert!(gap(&times));
+    }
+
+    #[test]
+    fn an_isolated_frame_covered_by_the_candidate_is_caught() {
+        // GRID-07 2024-03-15T03:54:57.233：窗里一整帧（这里 88 个时刻、每个时刻四路共戳），
+        // 候选窗盖住了整帧。排除候选窗的间隔会只剩跨空白的长间隔、把计数率估成几 c/s
+        let mut v = Vec::new();
+        for i in 0..88 {
+            let t = 100.5 + i as f64 * 8e-5;
+            v.extend((0..4).map(|d| (t, d as u8)));
+        }
+        let events = on_detectors(&v);
+        assert!(has_dead_gap(&events, 100.0, 101.0, 100.4999, 100.5071));
+    }
+
+    #[test]
+    fn shared_timestamps_do_not_make_the_rate_zero() {
+        // 共帧读出在高计数率下一半以上的相邻事例同戳：按事例算间隔中位数为 0。
+        // 按不同时戳算：每 10 ms 前 5 ms 每 30 µs 一帧（四路共戳），后 5 ms 全空
+        let mut v = Vec::new();
+        for frame in 0..100 {
+            let t0 = 100.0 + frame as f64 * 0.01;
+            for i in 0..166 {
+                let t = t0 + i as f64 * 3e-5;
+                v.extend((0..4).map(|d| (t, d as u8)));
+            }
+        }
+        assert!(has_dead_gap(&on_detectors(&v), 100.0, 101.0, -1.0, -1.0));
     }
 
     #[test]
