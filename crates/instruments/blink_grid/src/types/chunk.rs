@@ -33,7 +33,7 @@ pub struct Chunk<S: Satellite> {
     pub(super) dropped_dead_gap: AtomicUsize,
     /// 本底率超过读出可信上限而被否决的候选数，见 `search`
     pub(super) dropped_high_rate: AtomicUsize,
-    /// 最显著一格里的 ≥3 重同戳簇多到偶然解释不了（带电粒子）而被否决的候选数，见 `search`
+    /// 搜索前删掉的带电粒子事例数：GRID-03B 同一时戳 ≥ 3 路的簇（含标定脉冲），见 `search`
     pub(super) dropped_simultaneous: AtomicUsize,
     /// 峰值时刻没有姿态解（位姿文件整段 NaN）、姿态留空的候选数，见 `search`
     pub(super) without_attitude: AtomicUsize,
@@ -135,7 +135,7 @@ impl<S: Satellite> blink_core::traits::Chunk for Chunk<S> {
         }
         let simultaneous = self.dropped_simultaneous.load(Ordering::Relaxed);
         if simultaneous > 0 {
-            d.push(("dropped_simultaneous", simultaneous as f64));
+            d.push(("particle_events_removed", simultaneous as f64));
         }
         let no_attitude = self.without_attitude.load(Ordering::Relaxed);
         if no_attitude > 0 {
