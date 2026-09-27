@@ -334,8 +334,22 @@ f119/f120 = 0.0025，率 409–1374 c/s 时 0.022，**8.8 倍**。**寄存器里
 
 ### 7. 四个探测器合成一路
 
-同型探测器，与 HXMT 的做法一致。但一颗立方星四面各一个探测器，TGF 来自天底方向
-时未必四个都亮，分组是否更灵敏未评估（GBM 那边的经验是同型探测器合组更好）。
+同型探测器，与 HXMT 的做法一致（当初照 HXMT 定的，分组是否更灵敏没有专门评估）。
+
+**布局（2026-09-27 查文献更正）**：~~一颗立方星四面各一个探测器~~——错。四块 GAGG:Ce
+（3.8 × 3.8 × 1 cm）并排装在同一块 SiPM 板上、朝向相同，整个探测器 9.4 × 9.4 × 5 cm
+（Wen et al. 2021, NST 32:99, arXiv:2104.14228, Sec. II/III："four GAGG:Ce scintillators
+coupled with four SiPM arrays on one SiPM board"）。文献没有提晶体间倾角；四块角响应不同，
+归因于卫星部件的不对称遮挡（Liu et al., arXiv:2410.13402, Sec. 3.1）。与数据一致：真暴发
+四路均分，单路最大占比中位 0.36、最高 0.56。事后看合成一路是对的——TGF 只有 8–20 个计数，
+拆成四路每路 2–5 个都够不着 `min_number`。
+
+**读出电子学（与未决项 17 直接相关）**：带 "B" 后缀的载荷用 FPGA 数据采集，不带的用 MCU
+（Liu et al. 2024, Sec. 1）。MCU 版 "Four channels work in a single thread … other channels
+are in dead time, while one channel is triggered"（Wen et al. 2021, Sec. IV.2）——这就是我们从
+数据反推出的 02/04/07 四路共帧，03B 的逐探头独立读出对应 FPGA 版。文献标称死时间 GRID-01
+约 50 µs、固件改进后约 15 µs（后者未核原文）；实测 02/04/07 为 120 tick = 28.61 µs，03B 为
+20 tick = 4.77 µs，在轨固件的值要向天格团队确认。
 
 ### 8. 只跑过单元测试，没跑过真实数据
 
