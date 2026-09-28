@@ -1,4 +1,4 @@
-"""GRID 显著候选（fa<=1e-5, 本底率<=5 kc/s）的事例级特征：几路探测器、时间戳簇集、能谱、本底。
+"""GRID 显著候选（fa<=1e-5，不设本底上限）的事例级特征：几路探测器、时间戳簇集、能谱、本底。
 
 start 列写搜索给出的完整时刻（纳秒），不再截到毫秒：下游脚本（t90/profile/conserve/
 lightcurve）都拿这一列重新定位窗口，截到毫秒就是 1 ms 的定位误差。要和旧表或按
@@ -28,7 +28,7 @@ n = 0
 for sat in ("GRID-02", "GRID-03B", "GRID-04", "GRID-07"):
     sig = []
     for f in sorted(glob.glob(f"{R}/{sat}/*/*/*_signals.json")): sig += json.load(open(f))
-    sig = [c for c in sig if c["false_positive_per_year"] <= 1e-5 and c["mean"] / c["bin_size_best"] <= 5000]
+    sig = [c for c in sig if c["false_positive_per_year"] <= 1e-5]
     cache = {}
     for c in sig:
         t0 = met(c["start"]) + c["delay"]; t1 = t0 + c["bin_size_best"]; day = c["start"][:10].replace("-", "/")
