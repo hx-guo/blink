@@ -17,10 +17,11 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from cjk_font import FAMILIES as CJK_FAMILIES
 from matplotlib.gridspec import GridSpec
 
 plt.rcParams.update({
-    "font.sans-serif": ["PingFang SC", "Arial Unicode MS"], "font.family": "sans-serif",
+    "font.sans-serif": CJK_FAMILIES, "font.family": "sans-serif",
     "axes.unicode_minus": False, "font.size": 15, "axes.titlesize": 17, "axes.labelsize": 15,
     "xtick.labelsize": 13, "ytick.labelsize": 13, "legend.fontsize": 13, "lines.linewidth": 2,
 })
@@ -103,7 +104,7 @@ def panel_hist(ax, data):
     ax.set_xlim(-0.6, PLOT_TICKS * TICK_US)
     ax.axvline(TAU03B * TICK_US, color=C03B, lw=1.2, ls=":")
     ax.axvline(tau02 * TICK_US, color=C02, lw=1.2, ls=":")
-    ax.set_xlabel("跨探头相邻事例的时间间隔 (µs)　　[1 tick = 2⁻²² s = 0.2384 µs，四星相同]")
+    ax.set_xlabel("跨探头相邻事例的时间间隔 (µs)　　[1 tick = $2^{-22}$ s = 0.2384 µs，四星相同]")
     ax.set_ylabel("每 tick 的对数 / 每百万相邻对")
 
     o3, o2 = out["GRID-03B"], out["GRID-02"]
@@ -176,11 +177,11 @@ def panel_records(ax):
     ax.set_title("(c) 记录里的实测与注入结果", loc="left")
     lines = [
         ("读出结构（未决项 17(3)，四星各一次过境）", None),
-        ("  (0, τ) 占比：04 = 4.3×10⁻⁴、02 = 4.8×10⁻⁶；独立预期", None),
+        ("  (0, τ) 占比：04 = 4.3×$10^{-4}$、02 = 4.8×$10^{-6}$；独立预期", None),
         ("  的 1/130 与 1/3900。03B 与独立模型相符", None),
         ("帧成本律（未决项 20(5)，04/07/02 实测同一组整数）", None),
         ("  一帧 m 个事例占 120 + 37(m−1) tick；", None),
-        ("  输出上限 4/231 tick⁻¹ = 72.6 kc/s", None),
+        ("  输出上限 4/231 $tick^{-1}$ = 72.6 kc/s", None),
         ("有效并进窗 w（未决项 20(2)）：04 2.91 µs、07 3.37 µs", None),
         ("  —— 帧内只有触发后几 µs 的击中共用时戳", None),
         ("窗长 T 内四路合计的计数上限 4(⌊T/τ⌋+1)", None),
@@ -205,7 +206,22 @@ def main():
     ap.add_argument("--data", required=True)
     ap.add_argument("--burst", required=True)
     ap.add_argument("-o", required=True)
+    ap.add_argument("--slides", action="store_true",
+                    help="幻灯片版：只留 (a)(b)，去掉右侧的数字栏和内部记录的脚注")
     a = ap.parse_args()
+    if a.slides:
+        fig = plt.figure(figsize=(17.5, 12.0))
+        gs = GridSpec(2, 1, figure=fig, height_ratios=[1.2, 1.0], hspace=0.42)
+        ax_a = fig.add_subplot(gs[0]); ax_b = fig.add_subplot(gs[1])
+        out, samp = panel_hist(ax_a, a.data)
+        panel_burst(ax_b, a.burst)
+        ax_a.text(-0.06, -0.135, samp, transform=ax_a.transAxes, fontsize=11.5, color="0.35", va="top")
+        fig.text(0.01, 0.012, "(b) 下半部分按共帧读出的简化模型重放（帧长 28.6 µs，帧内每路至多 1 个、共用触发时刻），只示意机制。",
+                 fontsize=13, color="0.35", va="bottom")
+        fig.subplots_adjust(left=0.06, right=0.985, top=0.96, bottom=0.07)
+        fig.savefig(a.o, dpi=160)
+        print("wrote", a.o)
+        return
 
     fig = plt.figure(figsize=(17.5, 13.2))
     gs = GridSpec(2, 3, figure=fig, height_ratios=[1.25, 1.0], hspace=0.52, wspace=0.28)
@@ -222,7 +238,7 @@ def main():
     fig.text(0.01, 0.012,
              "(b) 的共帧读出用未决项 17(3) 的简化帧模型（帧长 28.61 µs、帧内每路至多 1 个、全帧共用触发时戳），只示意机制；"
              "实测的并进窗只有约 3 µs，帧内其余击中约 2/3 丢弃、约 1/5 排进下一帧（readout-and-b-corner.md §2），\n"
-             "逐个暴的去留要看注入检验，不看这一张示意。记录：该暴在共帧读出下仍留 8 个计数、fa = 9.7×10⁻⁷，"
+             "逐个暴的去留要看注入检验，不看这一张示意。记录：该暴在共帧读出下仍留 8 个计数、fa = 9.7×$10^{-7}$，"
              "但同戳占比 0.500 > 0.35，在 v10 的同戳门下被当成粒子否决（why-grid03b.md §3.1）。",
              fontsize=11.5, color="0.35", va="bottom")
     fig.subplots_adjust(left=0.06, right=0.985, top=0.905, bottom=0.085)
@@ -233,4 +249,5 @@ def main():
     print("burst", n_in, "->", n_out, "in", nf, "frames")
 
 
-main()
+if __name__ == "__main__":
+    main()

@@ -28,11 +28,12 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from cjk_font import FAMILIES as CJK_FAMILIES
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 
 plt.rcParams.update({
-    "font.sans-serif": ["PingFang SC", "Arial Unicode MS"], "font.family": "sans-serif",
+    "font.sans-serif": CJK_FAMILIES, "font.family": "sans-serif",
     "axes.unicode_minus": False, "font.size": 15, "axes.titlesize": 17, "axes.labelsize": 15,
     "xtick.labelsize": 13, "ytick.labelsize": 13, "legend.fontsize": 13, "lines.linewidth": 2,
 })
@@ -52,8 +53,8 @@ SAT_COLORS = {"GRID-02": "#d97706", "GRID-03B": "#c53030", "GRID-04": "#2b6cb0",
 # 另外三颗是四路共用的**帧长** 120 tick = 28.61 µs（02/07 先记的 119 tick 已按未决项 6 更正）——帧内每路最多 1 个事例、全帧共用触发那
 # 一击的时戳。见 blink_grid/OPEN-QUESTIONS.md 未决项 6 与 16。
 DEAD_TIME_US = {"GRID-02": 28.61, "GRID-03B": 4.77, "GRID-04": 28.61, "GRID-07": 28.61}
-DEAD_TIME_NAME = {"GRID-03B": "探头死时间", "GRID-02": "读出帧长",
-                  "GRID-04": "读出帧长", "GRID-07": "读出帧长"}
+DEAD_TIME_NAME = {"GRID-03B": "探头死时间", "GRID-02": "一次读出",
+                  "GRID-04": "一次读出", "GRID-07": "一次读出"}
 ENERGY_THRESHOLD_KEV = 30.0
 
 POLE_LAT, POLE_LON = np.radians(80.7), np.radians(-72.7)
@@ -350,10 +351,10 @@ def fig_map(d, out):
 # 完全同谱）的那个。两颗星的探头死时间差 6 倍，正是 A 角只出在 03B 的原因。
 EXAMPLES = [
     dict(tag="GRID-03B_20221004T000956543", sat="GRID-03B", color=RED,
-         title="A 角：GRID-03B 2022-10-04 00:09:56.5 UTC",
-         note="152.9°E 11.96°S｜偶极磁纬 −18°｜同时刻有闪电，巧合概率 3×10⁻⁴"),
+         title="A：GRID-03B 2022-10-04 00:09:56.5 UTC",
+         note="152.9°E 11.96°S｜偶极磁纬 −18°｜同时刻有闪电，巧合概率 3×$10^{-4}$"),
     dict(tag="GRID-02_20210124T195431291", sat="GRID-02", color=BLUE,
-         title="B 角：GRID-02 2021-01-24 19:54:31.3 UTC",
+         title="B：GRID-02 2021-01-24 19:54:31.3 UTC",
          note="149.3°W 47.2°S｜偶极磁纬 −45°｜WWLLN 有覆盖但无闪电"),
 ]
 
@@ -462,8 +463,10 @@ def fig_lightcurves(lc_dir, out):
         # 两条线重合时（B 角正是这种情况）标签要分开放，否则叠成一团
         same = abs(np.log10(med_i / med_b)) < 0.06
         ax.axhline(med_b, color="0.35", ls="--", lw=1.5)
-        ax.text(-half * 0.98, med_b, f" 本底中位 {med_b:.0f} keV（±1 s，{len(bkg_energy)} 个事例）",
-                ha="left", va="top" if same else "bottom", fontsize=12, color="0.35")
+        # 本底标签放在左下角空白处，不贴着虚线写：B 角那一例的暴内点正好铺在虚线上
+        ax.text(0.02, 0.04, f"本底中位 {med_b:.0f} keV（虚线；±1 s，{len(bkg_energy)} 个事例）",
+                transform=ax.transAxes, ha="left", va="bottom", fontsize=12, color="0.35",
+                bbox=dict(facecolor="white", edgecolor="none", alpha=0.85, pad=1.5))
         ax.axhline(med_i, color=ex["color"], ls="-", lw=1.5, alpha=0.7)
         ax.text(half * 0.98, med_i, f"暴内中位 {med_i:.0f} keV ", ha="right",
                 va="bottom" if (med_i > med_b or same) else "top", fontsize=13, color=ex["color"])
@@ -477,7 +480,7 @@ def fig_lightcurves(lc_dir, out):
         ax.text(0.5, -0.30, ex["note"], transform=ax.transAxes, ha="center", fontsize=13, color="0.3")
 
     fig.suptitle("两类各一例：A 角是几十微秒的硬脉冲，B 角是 3 ms 的平顶、能谱与本底相同；"
-                 "GRID-03B 是 4.77 µs 的逐探头死时间，GRID-02 是 28.61 µs 的四路共帧读出", y=0.985)
+                 "GRID-03B 是 4.77 µs 的逐探头死时间，GRID-02 一次读出四路一起停 28.61 µs", y=0.985)
     fig.savefig(out, dpi=170, bbox_inches="tight")
     plt.close(fig)
     print("wrote", out)
