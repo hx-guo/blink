@@ -17,7 +17,7 @@ BLINK = Path("/Users/skyair/Developer/ihep/blink")
 RECON = BLINK / "data/cache_260226a_reconstruct.csv"
 K1 = BLINK / "data/1K/Y202602/20260226-3179/HXMT_20260226T10_HE-Evt_FFFFFF_V1_1K.FITS"
 
-T0 = 446726270.0
+T0 = 446726273.0  # leap-second-aware MET of 2026-02-26T10:37:50 UTC (1B/1K MET includes 3 leap s since 2012)
 # Match paper §5.1 window: [T0-50, T0+100]s
 T_LO = T0 - 50.0
 T_HI = T0 + 100.0

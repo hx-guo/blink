@@ -9,7 +9,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 GRBS = [
-    ("221009A", "/tmp/diag_221009a.csv", 339945422.0, "#D62728"),
+    ("221009A", "/tmp/diag_221009a.csv", 339945423.0, "#D62728"),
     ("260226A", "/tmp/diag_260226a.csv", 446726273.0, "#2CA02C"),
     ("200415A", "/tmp/diag_200415a.csv", 261564488.0, "#9467BD"),
 ]

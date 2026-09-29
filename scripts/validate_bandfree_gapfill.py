@@ -17,7 +17,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-T0 = 446726270.0
+T0 = 446726273.0  # leap-second-aware MET of 2026-02-26T10:37:50 UTC (1B/1K MET includes 3 leap s since 2012)
 PACK = Path("data/pack_260226a")
 BOXES = ("a", "b", "c")
 D = 0.100          # gap duration, s

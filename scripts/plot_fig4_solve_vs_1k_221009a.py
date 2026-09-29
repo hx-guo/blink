@@ -33,19 +33,22 @@ TRIGGER  = "2022-10-09T13:17:00"
 BEFORE   = 10.0
 AFTER    = 290.0
 BIN      = 1.0
-ZOOM_LO  = 250.0
-ZOOM_HI  = 272.0  # extends past 1B's burst end (T+269.9) to capture
+ZOOM_LO  = 247.0
+ZOOM_HI  = 269.0  # extends past 1B's burst end (T+266.9) to capture
                   # 1K's wrap-shifted tail in Box A (1K max ~T+271.0)
-SHADE_C_LO = 263.0   # Box C: 1K=0 for ~7 s while 1B places ~12 k evt/s
-SHADE_C_HI = 270.0
-SHADE_A_LO = 251.0   # Box A: 1K wrap mis-select (+1.05 s = 1 ptime wrap)
-SHADE_A_HI = 253.0
+SHADE_C_LO = 260.0   # Box C: 1K=0 for ~7 s while 1B places ~12 k evt/s
+SHADE_C_HI = 267.0
+SHADE_A_LO = 248.0   # Box A: 1K wrap mis-select (+1.05 s = 1 ptime wrap)
+SHADE_A_HI = 250.0
 MET_EPOCH = datetime(2012, 1, 1, tzinfo=timezone.utc)
 
 
 def parse_met(s):
-    dt = datetime.strptime(s, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
-    return (dt - MET_EPOCH).total_seconds()
+    """UTC -> HXMT MET, leap-second-aware (1B/1K MET counts the 3 leap seconds
+    since 2012; a naive calendar difference is 3 s low and shifts every
+    T0-relative time on this figure by +3 s)."""
+    from astropy.time import Time
+    return Time(s, scale="utc").unix_tai - Time("2012-01-01T00:00:00", scale="utc").unix_tai
 
 
 def run_cli(source):

@@ -198,7 +198,7 @@ def main():
     bursts = {}
 
     # GRB 221009A tail: T0+330 to T0+680 s
-    T0_221009 = 339945422.0
+    T0_221009 = 339945423.0  # leap-second-aware MET of 2022-10-09T13:17:00 UTC
     bursts["221009A_tail"] = compute_ratio(
         "GRB 221009A tail", "20221009", "130000",
         trigger_met=T0_221009, t_lo_rel=330, t_hi_rel=680,
@@ -219,11 +219,11 @@ def main():
         orbit_path="data/hxmt_aux/HXMT_20200428T14_Orbit_FFFFFF_V1_1K.FITS",
     )
 
-    # GRB 260226A: trigger UTC 2026-02-26T10:37:50 -> MET 446726270 (T10 hour, NOT T13).
+    # GRB 260226A: trigger UTC 2026-02-26T10:37:50 -> MET 446726273 leap-aware (T10 hour, NOT T13).
     # Burst-peak phase T0+20 to T0+40s per §5.3; analyse window T0-30 to T0+70s for stats.
     recon_260226 = Path("data/cache_260226a_reconstruct.csv")
     if recon_260226.exists():
-        T0_260226 = 446726270.0
+        T0_260226 = 446726273.0
         bursts["260226A"] = compute_ratio(
             "GRB 260226A", "20260226", "100000",
             trigger_met=T0_260226, t_lo_rel=-30, t_hi_rel=70,
