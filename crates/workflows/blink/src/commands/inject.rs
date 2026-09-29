@@ -78,6 +78,24 @@ fn injected_event_rows(
 /// - 注入后的 target（`gaps`/`unreliable` 设为注入区间；`events` 等原样保留，供
 ///   标定窗（gap 外）与真值提取用）；
 /// - 每个注入区间内目标盒的**真值**事件 (met, channel, pulse_width)。
+/// 把追加过的 unreliable 区间整理成按 start 升序、互不重叠（重叠则合并）。
+///
+/// 重建里 `is_in_unreliable` 用二分查找（4b04af4），前提是区间有序且不相交，
+/// 而这条前提只在 debug 构建里断言。注入/共饱和把新区间 push 到表尾：目标盒真实
+/// 复位在后、注入 gap 在前时表就乱序，release 构建静默查错——部分注入 gap 内被扣作
+/// 真值的事件没被标定窗剔除，填充系统性偏高（250919A 密集注入前段 +30%）。
+fn normalize_intervals(mut v: Vec<UnreliableInterval>) -> Vec<UnreliableInterval> {
+    v.sort_by(|a, b| a.start.partial_cmp(&b.start).unwrap());
+    let mut out: Vec<UnreliableInterval> = Vec::with_capacity(v.len());
+    for iv in v {
+        match out.last_mut() {
+            Some(last) if iv.start <= last.stop => last.stop = last.stop.max(iv.stop),
+            _ => out.push(iv),
+        }
+    }
+    out
+}
+
 pub fn inject_gaps(
     target: &BoxReconstructionData,
     intervals: &[(f64, f64)],
@@ -117,6 +135,7 @@ pub fn inject_gaps(
     for &(s, e) in intervals {
         unreliable.push(UnreliableInterval { start: s, stop: e });
     }
+    let unreliable = normalize_intervals(unreliable);
 
     // 真值：每注入区间 [s,e) 内目标盒的真实事件（cross-ref 完全不用它们）
     let truth: Vec<Vec<(f64, u16, u8)>> = intervals
@@ -150,6 +169,7 @@ pub fn cosaturate(refb: &BoxReconstructionData, cosat: &[(f64, f64)]) -> BoxReco
     for &(s, e) in cosat {
         unreliable.push(UnreliableInterval { start: s, stop: e });
     }
+    let unreliable = normalize_intervals(unreliable);
     BoxReconstructionData {
         events: refb.events.clone(),
         channels: refb.channels.clone(),
@@ -362,6 +382,23 @@ fn write_table(path: &std::path::Path, header: &str, rows: &[String], label: &st
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn normalize_sorts_and_merges_appended_intervals() {
+        use super::normalize_intervals;
+        use blink_hxmt_he::algorithms::saturation::UnreliableInterval as U;
+        // 真实复位在后、注入 gap 追加在表尾 → 乱序，且与真实复位重叠
+        let v = vec![
+            U { start: 6.0, stop: 6.02 },
+            U { start: 8.0, stop: 8.03 },
+            U { start: -4.8, stop: -4.77 },
+            U { start: 6.01, stop: 6.05 },
+            U { start: -3.0, stop: -2.97 },
+        ];
+        let out = normalize_intervals(v);
+        let got: Vec<(f64, f64)> = out.iter().map(|u| (u.start, u.stop)).collect();
+        assert_eq!(got, vec![(-4.8, -4.77), (-3.0, -2.97), (6.0, 6.05), (8.0, 8.03)]);
+        assert!(out.windows(2).all(|w| w[0].stop <= w[1].start));
+    }
     use super::*;
     use blink_hxmt_he::algorithms::saturation::PacketInfo;
 
