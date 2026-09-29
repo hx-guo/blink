@@ -93,7 +93,7 @@ def process_rows(df, interp, P, t_ref):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--cache-dir", default="/Volumes/Graphite/blink_clean_relaxed")
+    ap.add_argument("--cache-dir", default="/Volumes/Graphite/work/blink/blink_clean_relaxed")
     ap.add_argument("--c25-json", default="/tmp/per_det_25param.json")
     ap.add_argument("--aacgm-grid", default="n_below_study/aacgm_grid_2020.npz")
     ap.add_argument("--rowgroups-per-file", type=int, default=8)

@@ -89,7 +89,7 @@ class TDigest:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--cache-dir", default="/Volumes/Graphite/blink_clean_relaxed")
+    ap.add_argument("--cache-dir", default="/Volumes/Graphite/work/blink/blink_clean_relaxed")
     ap.add_argument("--c25-json", default="/tmp/per_det_25param.json")
     ap.add_argument("--aacgm-grid", default="n_below_study/aacgm_grid_2020.npz")
     ap.add_argument("--output", default="plots/c25_conservation_fullpop.png")
