@@ -3,7 +3,7 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Fitsio error: {0}")]
-    FitsioError(#[from] fitsio::errors::Error),
+    FitsioError(#[from] fitsio_pure::compat::errors::Error),
     #[error("file not found: {0}")]
     FileNotFound(String),
     #[error("invalid data: {0}")]

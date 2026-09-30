@@ -33,14 +33,14 @@ pub struct EvtFile {
 }
 
 impl EvtFile {
-    pub fn from_fits_file(path: &str) -> Result<Self, fitsio::errors::Error> {
-        let mut fptr = fitsio::FitsFile::open(path)?;
+    pub fn from_fits_file(path: &str) -> Result<Self, fitsio_pure::compat::errors::Error> {
+        let fptr = fitsio_pure::compat::fitsfile::FitsFile::open(path)?;
 
-        // let ebounds = EboundsHdu::from_fptr(&mut fptr)?;
-        let gti = GtiHdu::from_fptr(&mut fptr)?;
-        let events01 = EventsHdu::from_fptr(&mut fptr, 1)?;
-        let events02 = EventsHdu::from_fptr(&mut fptr, 2)?;
-        let events03 = EventsHdu::from_fptr(&mut fptr, 3)?;
+        // let ebounds = EboundsHdu::from_fptr(&fptr)?;
+        let gti = GtiHdu::from_fptr(&fptr)?;
+        let events01 = EventsHdu::from_fptr(&fptr, 1)?;
+        let events02 = EventsHdu::from_fptr(&fptr, 2)?;
+        let events03 = EventsHdu::from_fptr(&fptr, 3)?;
 
         let time_reversals = events01
             .time_reversals()

@@ -53,16 +53,16 @@ impl EventFile {
     }
 
     fn new(filename: &str) -> Result<Self, Error> {
-        let mut fptr = fitsio::FitsFile::open(filename)?;
+        let fptr = fitsio_pure::compat::fitsfile::FitsFile::open(filename)?;
 
         // HDU 1: Events
         let events = fptr.hdu("Events")?;
-        let time = events.read_col::<f64>(&mut fptr, "Time")?;
-        let det_id = events.read_col::<u8>(&mut fptr, "Det_ID")?;
-        let channel = events.read_col::<u8>(&mut fptr, "Channel")?;
-        let pulse_width = events.read_col::<u8>(&mut fptr, "Pulse_Width")?;
+        let time = events.read_col::<f64>(&fptr, "Time")?;
+        let det_id = events.read_col::<u8>(&fptr, "Det_ID")?;
+        let channel = events.read_col::<u8>(&fptr, "Channel")?;
+        let pulse_width = events.read_col::<u8>(&fptr, "Pulse_Width")?;
 
-        let acd_raw = events.read_col::<u32>(&mut fptr, "ACD")?;
+        let acd_raw = events.read_col::<u32>(&fptr, "ACD")?;
         let mut acd = Vec::with_capacity(acd_raw.len());
         for &value in &acd_raw {
             let mut array = [false; 18];
@@ -72,8 +72,8 @@ impl EventFile {
             acd.push(array);
         }
 
-        let event_type = events.read_col::<u8>(&mut fptr, "Event_Type")?;
-        // let flag = events.read_col::<u8>(&mut fptr, "FLAG")?;
+        let event_type = events.read_col::<u8>(&fptr, "Event_Type")?;
+        // let flag = events.read_col::<u8>(&fptr, "FLAG")?;
 
         Ok(Self {
             time,
