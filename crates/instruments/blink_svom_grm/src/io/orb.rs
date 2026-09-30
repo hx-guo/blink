@@ -14,10 +14,10 @@ pub struct OrbFile {
 }
 
 impl OrbFile {
-    pub fn from_fits_file(path: &str) -> Result<Self, fitsio::errors::Error> {
-        let mut fptr = fitsio::FitsFile::open(path)?;
+    pub fn from_fits_file(path: &str) -> Result<Self, fitsio_pure::compat::errors::Error> {
+        let fptr = fitsio_pure::compat::fitsfile::FitsFile::open(path)?;
 
-        let orb = OrbHdu::from_fptr(&mut fptr)?;
+        let orb = OrbHdu::from_fptr(&fptr)?;
 
         Ok(Self { orb })
     }
@@ -43,7 +43,9 @@ struct OrbHdu {
 }
 
 impl OrbHdu {
-    fn from_fptr(fptr: &mut fitsio::FitsFile) -> Result<Self, fitsio::errors::Error> {
+    fn from_fptr(
+        fptr: &fitsio_pure::compat::fitsfile::FitsFile,
+    ) -> Result<Self, fitsio_pure::compat::errors::Error> {
         let orb = fptr.hdu("ORB")?;
 
         let time = orb.read_col::<f64>(fptr, "TIME")?;

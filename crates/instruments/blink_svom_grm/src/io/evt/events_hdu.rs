@@ -14,7 +14,10 @@ pub(super) struct EventsHdu {
 }
 
 impl EventsHdu {
-    pub fn from_fptr(fptr: &mut fitsio::FitsFile, id: u8) -> Result<Self, fitsio::errors::Error> {
+    pub fn from_fptr(
+        fptr: &fitsio_pure::compat::fitsfile::FitsFile,
+        id: u8,
+    ) -> Result<Self, fitsio_pure::compat::errors::Error> {
         let events = fptr.hdu(format!("EVENTS0{}", id).as_str())?;
 
         let time = events.read_col::<f64>(fptr, "TIME")?;

@@ -31,21 +31,21 @@ pub struct PosHistFile {
 }
 
 impl PosHistFile {
-    pub fn from_fits_file(path: &str) -> Result<Self, fitsio::errors::Error> {
-        let mut fptr = fitsio::FitsFile::open(path)?;
+    pub fn from_fits_file(path: &str) -> Result<Self, fitsio_pure::compat::errors::Error> {
+        let fptr = fitsio_pure::compat::fitsfile::FitsFile::open(path)?;
         let hdu = fptr.hdu(1)?;
 
-        let time = hdu.read_col::<f64>(&mut fptr, "SCLK_UTC")?;
-        let q1 = hdu.read_col::<f64>(&mut fptr, "QSJ_1")?;
-        let q2 = hdu.read_col::<f64>(&mut fptr, "QSJ_2")?;
-        let q3 = hdu.read_col::<f64>(&mut fptr, "QSJ_3")?;
-        let latitude = hdu.read_col::<f32>(&mut fptr, "SC_LAT")?;
-        let longitude = hdu.read_col::<f32>(&mut fptr, "SC_LON")?;
-        let flags = hdu.read_col::<i16>(&mut fptr, "FLAGS")?;
+        let time = hdu.read_col::<f64>(&fptr, "SCLK_UTC")?;
+        let q1 = hdu.read_col::<f64>(&fptr, "QSJ_1")?;
+        let q2 = hdu.read_col::<f64>(&fptr, "QSJ_2")?;
+        let q3 = hdu.read_col::<f64>(&fptr, "QSJ_3")?;
+        let latitude = hdu.read_col::<f32>(&fptr, "SC_LAT")?;
+        let longitude = hdu.read_col::<f32>(&fptr, "SC_LON")?;
+        let flags = hdu.read_col::<i16>(&fptr, "FLAGS")?;
 
-        let x = hdu.read_col::<f32>(&mut fptr, "POS_X")?;
-        let y = hdu.read_col::<f32>(&mut fptr, "POS_Y")?;
-        let z = hdu.read_col::<f32>(&mut fptr, "POS_Z")?;
+        let x = hdu.read_col::<f32>(&fptr, "POS_X")?;
+        let y = hdu.read_col::<f32>(&fptr, "POS_Y")?;
+        let z = hdu.read_col::<f32>(&fptr, "POS_Z")?;
         let altitude = x
             .iter()
             .zip(y.iter())

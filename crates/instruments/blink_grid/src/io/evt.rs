@@ -29,22 +29,22 @@ struct DetectorHdu {
 }
 
 impl PassFile {
-    pub fn from_fits_file(path: &str) -> Result<Self, fitsio::errors::Error> {
-        let mut fptr = fitsio::FitsFile::open(path)?;
+    pub fn from_fits_file(path: &str) -> Result<Self, fitsio_pure::compat::errors::Error> {
+        let fptr = fitsio_pure::compat::fitsfile::FitsFile::open(path)?;
 
         let ebounds = fptr.hdu("EBOUNDS")?;
-        let emin = ebounds.read_col::<f64>(&mut fptr, "E_MIN")?;
+        let emin = ebounds.read_col::<f64>(&fptr, "E_MIN")?;
         let ebounds_emin: Vec<f32> = emin.into_iter().map(|e| e as f32).collect();
 
-        let (start, stop) = Self::gti_of(&mut fptr)?;
+        let (start, stop) = Self::gti_of(&fptr)?;
 
         let mut detectors = Vec::with_capacity(4);
         for id in 0..4 {
             let events = fptr.hdu(format!("EVENTS{id}").as_str())?;
             detectors.push(DetectorHdu {
-                time: events.read_col::<f64>(&mut fptr, "TIME")?,
-                pi: events.read_col::<i16>(&mut fptr, "PI")?,
-                evt_type: events.read_col::<u8>(&mut fptr, "EVT_TYPE")?,
+                time: events.read_col::<f64>(&fptr, "TIME")?,
+                pi: events.read_col::<i16>(&fptr, "PI")?,
+                evt_type: events.read_col::<u8>(&fptr, "EVT_TYPE")?,
             });
         }
         let detectors: [DetectorHdu; 4] = detectors.try_into().ok().expect("four detector HDUs");
@@ -58,12 +58,14 @@ impl PassFile {
     }
 
     /// 只读 GTI，用来判断这次过境是否落在要搜的那个小时里，不必把事例读进来。
-    pub fn gti_of_file(path: &str) -> Result<(f64, f64), fitsio::errors::Error> {
-        let mut fptr = fitsio::FitsFile::open(path)?;
-        Self::gti_of(&mut fptr)
+    pub fn gti_of_file(path: &str) -> Result<(f64, f64), fitsio_pure::compat::errors::Error> {
+        let fptr = fitsio_pure::compat::fitsfile::FitsFile::open(path)?;
+        Self::gti_of(&fptr)
     }
 
-    fn gti_of(fptr: &mut fitsio::FitsFile) -> Result<(f64, f64), fitsio::errors::Error> {
+    fn gti_of(
+        fptr: &fitsio_pure::compat::fitsfile::FitsFile,
+    ) -> Result<(f64, f64), fitsio_pure::compat::errors::Error> {
         let gti = fptr.hdu("GTI")?;
         let start = gti.read_col::<f64>(fptr, "START")?;
         let stop = gti.read_col::<f64>(fptr, "STOP")?;

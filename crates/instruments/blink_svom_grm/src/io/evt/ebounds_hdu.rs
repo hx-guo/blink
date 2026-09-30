@@ -5,7 +5,7 @@
 // }
 
 // impl EboundsHdu {
-//     pub fn from_fptr(fptr: &mut fitsio::FitsFile) -> Result<Self, fitsio::errors::Error> {
+//     pub fn from_fptr(fptr: &fitsio_pure::compat::fitsfile::FitsFile) -> Result<Self, fitsio_pure::compat::errors::Error> {
 //         let ebounds = fptr.hdu("EBOUNDS")?;
 
 //         let channel = ebounds.read_col::<i16>(fptr, "CHANNEL")?;

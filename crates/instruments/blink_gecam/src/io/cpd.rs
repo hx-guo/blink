@@ -32,13 +32,13 @@ const MAX_DETECTORS: u8 = 99;
 ///
 /// 要求零列而不只是零行，是因为**零行但有列**是正常的：CPD 本底率只有 GRD
 /// 的百分之几，一小时真的可以一个事例都没有，那是测量结果不是占位。
-fn is_stub(info: &fitsio::hdu::HduInfo) -> bool {
+fn is_stub(info: &fitsio_pure::compat::hdu::HduInfo) -> bool {
     matches!(
         info,
-        fitsio::hdu::HduInfo::TableInfo {
-            column_descriptions,
-            num_rows,
-        } if *num_rows == 0 && column_descriptions.is_empty()
+        fitsio_pure::compat::hdu::HduInfo::TableInfo {
+            column_count,
+            row_count,
+        } if *row_count == 0 && *column_count == 0
     )
 }
 
@@ -57,7 +57,7 @@ impl<S: Satellite> CpdFile<S> {
     /// **返回 `Ok(None)` 表示这是个占位空壳**，与「归档里根本没有这个文件」
     /// 同等对待，由调用方降级成「这一小时没有 CPD 数据」。见 [`is_stub`]。
     pub fn from_fits_file(path: &str) -> Result<Option<Self>, Error> {
-        let mut fptr = fitsio::FitsFile::open(path)?;
+        let fptr = fitsio_pure::compat::fitsfile::FitsFile::open(path)?;
 
         let mut rows: Vec<(f64, u8)> = Vec::new();
         let mut detector_count = 0usize;
@@ -67,12 +67,12 @@ impl<S: Satellite> CpdFile<S> {
                 break;
             };
             detector_count += 1;
-            if is_stub(&hdu.info) {
+            if is_stub(&hdu.info(&fptr)?) {
                 stub_tables += 1;
                 continue;
             }
-            let time = hdu.read_col::<f64>(&mut fptr, "TIME")?;
-            let evt_type = hdu.read_col::<u8>(&mut fptr, "EVT_TYPE")?;
+            let time = hdu.read_col::<f64>(&fptr, "TIME")?;
+            let evt_type = hdu.read_col::<u8>(&fptr, "EVT_TYPE")?;
             rows.extend(
                 time.into_iter()
                     .zip(evt_type)
@@ -202,16 +202,10 @@ mod tests {
         assert_eq!(file.count_multi_within(0.0, 1.0), 0);
     }
 
-    fn table(columns: usize, rows: usize) -> fitsio::hdu::HduInfo {
-        use fitsio::tables::{ColumnDataDescription, ColumnDataType, ConcreteColumnDescription};
-        fitsio::hdu::HduInfo::TableInfo {
-            column_descriptions: (0..columns)
-                .map(|k| ConcreteColumnDescription {
-                    name: format!("COL{k}"),
-                    data_type: ColumnDataDescription::new(ColumnDataType::Double, 1, 1),
-                })
-                .collect(),
-            num_rows: rows,
+    fn table(columns: usize, rows: usize) -> fitsio_pure::compat::hdu::HduInfo {
+        fitsio_pure::compat::hdu::HduInfo::TableInfo {
+            column_count: columns,
+            row_count: rows,
         }
     }
 
@@ -239,10 +233,10 @@ mod tests {
     /// 图像 HDU、或者认不出来的 HDU，都不算占位。
     #[test]
     fn only_a_table_can_be_a_placeholder() {
-        assert!(!is_stub(&fitsio::hdu::HduInfo::AnyInfo));
-        assert!(!is_stub(&fitsio::hdu::HduInfo::ImageInfo {
+        assert!(!is_stub(&fitsio_pure::compat::hdu::HduInfo::AnyInfo));
+        assert!(!is_stub(&fitsio_pure::compat::hdu::HduInfo::ImageInfo {
             shape: vec![],
-            image_type: fitsio::images::ImageType::Double,
+            image_type: fitsio_pure::compat::images::ImageType::Double,
         }));
     }
 }

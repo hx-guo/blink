@@ -29,21 +29,21 @@ pub struct PosAttFile {
 }
 
 impl PosAttFile {
-    pub fn from_fits_file(path: &str) -> Result<Self, fitsio::errors::Error> {
-        let mut fptr = fitsio::FitsFile::open(path)?;
+    pub fn from_fits_file(path: &str) -> Result<Self, fitsio_pure::compat::errors::Error> {
+        let fptr = fitsio_pure::compat::fitsfile::FitsFile::open(path)?;
         let hdu = fptr.hdu("Orbit_Attitude")?;
 
         Ok(Self {
-            time: hdu.read_col::<f64>(&mut fptr, "TIME")?,
+            time: hdu.read_col::<f64>(&fptr, "TIME")?,
             // 表里有 Q1..Q4，`Attitude` 只收三个分量；标量分量放在 Q1 还是 Q4
             // 尚未核实，见本 crate 的 OPEN-QUESTIONS。姿态目前只作元数据随候选
             // 记录，不参与任何判据，所以先按表里的顺序原样取前三个。
-            q1: hdu.read_col::<f32>(&mut fptr, "Q1")?,
-            q2: hdu.read_col::<f32>(&mut fptr, "Q2")?,
-            q3: hdu.read_col::<f32>(&mut fptr, "Q3")?,
-            x: hdu.read_col::<f64>(&mut fptr, "X_WGS84")?,
-            y: hdu.read_col::<f64>(&mut fptr, "Y_WGS84")?,
-            z: hdu.read_col::<f64>(&mut fptr, "Z_WGS84")?,
+            q1: hdu.read_col::<f32>(&fptr, "Q1")?,
+            q2: hdu.read_col::<f32>(&fptr, "Q2")?,
+            q3: hdu.read_col::<f32>(&fptr, "Q3")?,
+            x: hdu.read_col::<f64>(&fptr, "X_WGS84")?,
+            y: hdu.read_col::<f64>(&fptr, "Y_WGS84")?,
+            z: hdu.read_col::<f64>(&fptr, "Z_WGS84")?,
         })
     }
 
