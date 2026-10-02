@@ -5,9 +5,10 @@ use COL_W and full-width (figure*) figures use FULL_W as their figsize
 width, so \\includegraphics applies no scaling and fonts render at
 their nominal size in print.
 
-Nominal sizes (identical across all figures): 8 pt axis labels and
-panel tags, 7 pt tick labels, 6.5 pt legends. The paper body is 10 pt
-and captions ~9 pt, so figure text sits one step below the caption.
+Nominal sizes (identical across all figures): 9 pt axis labels and
+panel tags, 8 pt tick labels, legends and annotations. The paper body
+is 10 pt and captions 8 pt, so no figure text is smaller than the
+caption and the figures stay legible without zooming.
 
 Measured from the SCPMA template (2026-07): \\columnwidth inside
 multicols = 243.27 pt = 3.366 in; \\textwidth = 506.46 pt = 7.007 in.
@@ -37,12 +38,12 @@ def apply():
         # Times-compatible family shipped with matplotlib
         "font.family": "STIXGeneral",
         "mathtext.fontset": "stix",
-        "font.size": 8,
-        "axes.labelsize": 8,
-        "axes.titlesize": 8,
-        "xtick.labelsize": 7,
-        "ytick.labelsize": 7,
-        "legend.fontsize": 6.5,
+        "font.size": 9,
+        "axes.labelsize": 9,
+        "axes.titlesize": 9,
+        "xtick.labelsize": 8,
+        "ytick.labelsize": 8,
+        "legend.fontsize": 8,
         "axes.linewidth": 0.6,
         "lines.linewidth": 1.0,
         "xtick.direction": "in",

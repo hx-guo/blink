@@ -121,12 +121,12 @@ def main():
         if box == "C":
             ax.text((SHADE_C_LO + SHADE_C_HI) / 2, 15500,
                     r"1K $=$ 0 counts/s for ${\sim}7$ s",
-                    ha="center", va="top", fontsize=7, color="#7A1212",
+                    ha="center", va="top", fontsize=8, color="#7A1212",
                     fontweight="bold")
         if box == "A":
             ax.text(SHADE_A_HI + 0.6, 15500,
                     r"1K $+1$ wrap shift (${\sim}1.05$ s late)",
-                    ha="left", va="top", fontsize=7, color="#7A1212",
+                    ha="left", va="top", fontsize=8, color="#7A1212",
                     fontweight="bold")
 
     axes[-1].set_xlabel(

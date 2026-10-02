@@ -145,9 +145,9 @@ def main() -> int:
     ax.margins(x=0)
     ax.set_ylabel("net rate (counts/s)")
     ax.text(0.02, 0.92, f"all events, {BIN * 1e3:.0f} ms bins",
-            transform=ax.transAxes, fontweight="bold", va="top", fontsize=8)
+            transform=ax.transAxes, fontweight="bold", va="top", fontsize=9)
     ax.legend(loc="upper right", ncol=2)
-    ax.set_ylim(min(0, nHo[vis].min() * 1.1), ymax * 1.28)
+    ax.set_ylim(min(0, nHo[vis].min() * 1.1), ymax * 1.65)
     ax.yaxis.set_major_locator(matplotlib.ticker.MaxNLocator(nbins=5, prune="both"))
 
     # ---- lower three panels: CsI bands ----
@@ -173,7 +173,7 @@ def main() -> int:
         ax.set_ylabel("net rate (counts/s)")
         ax.text(0.02, 0.92, f"{lo:.0f}–{hi:.0f} keV (deposited), "
                 f"{BIN * 1e3:.0f} ms bins", transform=ax.transAxes,
-                fontweight="bold", va="top", fontsize=8)
+                fontweight="bold", va="top", fontsize=9)
         ax.legend(loc="upper right")
         ax.set_ylim(min(0, nHo[vis].min() * 1.1), nHa[vis].max() * 1.14)
         ax.yaxis.set_major_locator(

@@ -151,7 +151,7 @@ def main() -> int:
     ax.set_ylabel("net rate (counts/s)")
     ax.text(0.02, 0.92, f"all events, {BIN * 1e3:.0f} ms bins",
             transform=ax.transAxes,
-            fontsize=8, fontweight="bold", va="top")
+            fontsize=9, fontweight="bold", va="top")
     ax.legend(loc="upper right")
 
     for ax, (elo, ehi) in zip(axes[1:], CSI_BANDS):
@@ -198,7 +198,7 @@ def main() -> int:
         ax.text(0.02, 0.90,
                 f"{elo:.0f}–{ehi:.0f} keV (deposited), "
                 f"{BIN * 1e3:.0f} ms bins",
-                transform=ax.transAxes, fontsize=8, fontweight="bold",
+                transform=ax.transAxes, fontsize=9, fontweight="bold",
                 va="top")
         ax.legend(loc="upper right")
 

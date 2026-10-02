@@ -98,10 +98,10 @@ def main():
             label=f"ASIM/MXGS LED 50–400 keV ($\\times${scale:.1f})")
     ax.axhline(0, color="gray", lw=0.5, ls="--")
     ax.set_ylabel("Net count rate (counts s$^{-1}$)")
-    ax.legend(loc="upper right")
+    ax.legend(loc="center right")
     ax.set_ylim(-1e5, 1.8e6)
     ax.text(0.5 * (sat_lo + sat_hi) * ms, 1.62e6, "HXMT FIFO\nsaturation",
-            ha="center", va="top", fontsize=7, color="#A02030", style="italic")
+            ha="center", va="top", fontsize=8, color="#A02030", style="italic")
     ax.set_xlabel("Time since $T_0$ (ms)")
     ax.set_xlim(XLIM[0] * ms, XLIM[1] * ms)
 
