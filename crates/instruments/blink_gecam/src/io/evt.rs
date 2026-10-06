@@ -40,22 +40,22 @@ pub struct EvtFile<S: Satellite> {
 
 impl<S: Satellite> EvtFile<S> {
     pub fn from_fits_file(path: &str) -> Result<Self, Error> {
-        let mut fptr = fitsio::FitsFile::open(path)?;
+        let fptr = fitsio_pure::compat::fitsfile::FitsFile::open(path)?;
 
         // 能量梯必须是标定过的那把尺子（ch0 = 2.00 keV、梯内逐道连续、梯顶
         // 10053.5 keV），梯长与能阈道由这张表自己给出——**归档里有两把梯子，
         // 同一个道号在它们上面差一倍能量**，照搬道号会把能窗整个搬错位。
-        let ebounds = EboundsHdu::from_fptr(&mut fptr)?;
+        let ebounds = EboundsHdu::from_fptr(&fptr)?;
         let ladder = ebounds
             .ladder(MIN_ENERGY_KEV)
             .map_err(|error| Error::InvalidData(format!("{path}: {error}")))?;
         let channels = ChannelWindow::new(ladder.min_channel, ladder.length);
-        let gti = GtiHdu::from_fptr(&mut fptr)?;
+        let gti = GtiHdu::from_fptr(&fptr)?;
 
         // 路数随星而异（A/B 25 路、C 12 路），探到读不着为止
         let mut detectors = Vec::new();
         for id in 1..=MAX_DETECTORS {
-            match EventsHdu::from_fptr(&mut fptr, id) {
+            match EventsHdu::from_fptr(&fptr, id) {
                 Ok(hdu) => detectors.push(hdu),
                 Err(_) => break,
             }

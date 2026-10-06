@@ -17,7 +17,10 @@ pub(super) struct EventsHdu<S: Satellite> {
 
 impl<S: Satellite> EventsHdu<S> {
     /// `id` 从 1 数起，对应 HDU 名 `EVENTS01`、`EVENTS02` ……
-    pub fn from_fptr(fptr: &mut fitsio::FitsFile, id: u8) -> Result<Self, fitsio::errors::Error> {
+    pub fn from_fptr(
+        fptr: &fitsio_pure::compat::fitsfile::FitsFile,
+        id: u8,
+    ) -> Result<Self, fitsio_pure::compat::errors::Error> {
         let events = fptr.hdu(format!("EVENTS{id:02}").as_str())?;
 
         Ok(Self {

@@ -12,7 +12,9 @@ pub(super) struct GtiHdu {
 }
 
 impl GtiHdu {
-    pub fn from_fptr(fptr: &mut fitsio::FitsFile) -> Result<Self, fitsio::errors::Error> {
+    pub fn from_fptr(
+        fptr: &fitsio_pure::compat::fitsfile::FitsFile,
+    ) -> Result<Self, fitsio_pure::compat::errors::Error> {
         let gti = fptr.hdu("GTI")?;
         Ok(Self {
             start: gti.read_col::<f64>(fptr, "START")?,
