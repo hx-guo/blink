@@ -238,6 +238,8 @@ pub fn search_new<E: Event>(
                     stop,
                 );
                 let pure_mean_duration = mean_live - hollow_live;
+                // 本底活时间为零（GTI 段比挖空区还短）时估不出本底，这个窗不检验。
+                let has_background = pure_mean_duration.get::<uom::si::time::second>() > 0.0;
                 let pure_mean_percent =
                     (duration / pure_mean_duration).get::<uom::si::ratio::ratio>();
                 let threshold = config.false_positive_per_year
@@ -300,7 +302,9 @@ pub fn search_new<E: Event>(
                 // 单组时是 fps[0] * 1.0，浮点上精确等于原值 —— HXMT 与 SVOM
                 // 逐位不受影响。
                 // N=1 走原来的路：只要最小的那个，不必排序，数值与从前逐位相同。
-                let fp = if n_required == 1 {
+                let fp = if !has_background {
+                    f64::INFINITY
+                } else if n_required == 1 {
                     (0..group_number).map(group_fp).fold(f64::INFINITY, f64::min)
                         * group_number as f64
                 } else {
@@ -409,6 +413,24 @@ mod tests {
 
     fn t(seconds: f64) -> MissionElapsedTime<TestInstrument> {
         MissionElapsedTime::new(seconds)
+    }
+
+    /// GTI 段比挖空区还短时本底活时间是零，估不出本底——这个窗不能检验，
+    /// 更不能把 0/0 = NaN 喂给泊松分布（2022-03-19 T00 开机爬升时实际崩过）。
+    #[test]
+    fn a_segment_shorter_than_the_hollow_is_not_tested() {
+        let data: Vec<TestEvent> = (0..20)
+            .map(|i| TestEvent { seconds: 100.0 + i as f64 * 2e-4, group: 0 })
+            .collect();
+        let result = search_new(
+            &data,
+            1,
+            t(0.0),
+            t(3600.0),
+            &[[t(100.0), t(100.004)]],
+            SearchConfig::default(),
+        );
+        assert!(result.is_empty(), "估不出本底的窗不该出候选");
     }
 
     #[test]

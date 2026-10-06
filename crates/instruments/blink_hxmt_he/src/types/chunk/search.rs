@@ -29,11 +29,30 @@ pub fn search(chunk: &Chunk) -> Vec<Signal<Event>> {
     // 早就算对了。判别三分类见 OPEN-QUESTIONS 第 34 条。
     //
     // 用的是过滤后的 `events`，与搜索的分子同一份，口径自洽。
-    let gti = live_time::gti_from_events(
+    //
+    // 按机箱求交（`gti_from_events_by_box`）：本底窗里探头配置必须不变。机箱开关机
+    // 不同步时整机的流仍连续，整机 GTI 切不掉，却只有一两个机箱在出数——2023-08-31
+    // 那个 fa 1e-25 的假 TGF 就坐在 Box C 先开机的几毫秒上（OPEN-QUESTIONS 第 10 条）。
+    // 交集之外的事例一并去掉：它们来自配置不全的时段，留着会让本底窗的分子与分母
+    // 口径不一。
+    let gti = live_time::gti_from_events_by_box(
         &events,
         [chunk.span[0], chunk.span[1]],
         live_time::DEFAULT_FALSE_GAP_BUDGET,
     );
+    let events = {
+        let mut seg = 0usize;
+        events
+            .into_iter()
+            .filter(|event| {
+                let t = event.time();
+                while seg < gti.len() && gti[seg][1] < t {
+                    seg += 1;
+                }
+                seg < gti.len() && gti[seg][0] <= t
+            })
+            .collect::<Vec<_>>()
+    };
 
     let results = search_new(
         &events,

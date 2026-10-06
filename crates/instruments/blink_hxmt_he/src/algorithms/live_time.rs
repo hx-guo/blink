@@ -38,6 +38,11 @@ use blink_core::traits::Event as _;
 use blink_core::types::MissionElapsedTime;
 use uom::si::time::second;
 
+/// 按机箱求交后，短于它的段丢掉：比本底窗（搜索的 `neighbor`，1 s）还短的段里
+/// 估不出本底（挖空区一减，本底活时间可以是零）。开机爬升时各机箱零星出数、
+/// 停一秒再正常出数，求交正好留下这种几毫秒的碎片。
+pub const MIN_SEGMENT_SECONDS: f64 = 1.0;
+
 /// 每小时允许误判出的假缺口条数。
 pub const DEFAULT_FALSE_GAP_BUDGET: f64 = 1e-3;
 
@@ -84,13 +89,18 @@ pub fn gti_from_times(times: &[f64], span_end: f64, budget: f64) -> Vec<[f64; 2]
     let thresholds = window_thresholds(times, span_end, budget);
 
     // 首尾也按同一条判据看：文件开头就没数据的话，那一截不是活时间。
+    //
+    // 缺口按**有数据那一侧**的速率判：没有事例的速率窗估不出阈值（沿用前一窗，
+    // 开头则是无穷），拿它判缺口等于永远不切。2023-08-31 T08 小时开头仪器关了
+    // 150 s，按缺口起点（0 s）取阈值是无穷，那 150 s 就一直算活时间。
     let mut cuts: Vec<(f64, f64)> = Vec::new();
-    if times[0] > threshold_at(&thresholds, 0.0) {
+    if times[0] > threshold_at(&thresholds, times[0]) {
         cuts.push((0.0, times[0]));
     }
     for i in 1..times.len() {
         let dt = times[i] - times[i - 1];
-        if dt > threshold_at(&thresholds, times[i - 1]) {
+        let threshold = threshold_at(&thresholds, times[i - 1]).min(threshold_at(&thresholds, times[i]));
+        if dt > threshold {
             cuts.push((times[i - 1], times[i]));
         }
     }
@@ -114,6 +124,67 @@ pub fn gti_from_times(times: &[f64], span_end: f64, budget: f64) -> Vec<[f64; 2]
         segments.push([cursor, span_end]);
     }
     if segments.is_empty() { whole } else { segments }
+}
+
+/// HE 的三个电子学机箱：Det_ID 0–5 是 Box A，6–11 是 B，12–17 是 C。
+///
+/// 实测：各机箱 FIFO 复位期间静默的正好是这 6 路（每箱 40 次复位，
+/// `v6run/box_map.py`）。
+pub fn box_of(detector_id: u8) -> usize {
+    (detector_id / 6) as usize
+}
+
+/// [`gti_from_boxes`] 的事例版：按 `detector.id` 分到三个机箱。
+pub fn gti_from_events_by_box(
+    events: &[Event],
+    span: [MissionElapsedTime<HxmtHe>; 2],
+    budget: f64,
+) -> Vec<[MissionElapsedTime<HxmtHe>; 2]> {
+    let t0 = span[0];
+    let mut per_box: Vec<Vec<f64>> = vec![Vec::new(); crate::types::chunk::N_BOXES];
+    for e in events {
+        per_box[box_of(e.detector.id)].push((e.time() - t0).get::<second>());
+    }
+    let span_end = (span[1] - t0).get::<second>();
+    gti_from_boxes(&per_box, span_end, budget)
+        .into_iter()
+        .map(|[a, b]| [shift(t0, a), shift(t0, b)])
+        .collect()
+}
+
+/// 按机箱推 GTI：三个机箱各自用 [`gti_from_times`] 的同一条判据，再与整机的求交。
+///
+/// 搜索的本底估计假定本底窗（±0.5 s）里探头配置不变。机箱开关机不同步（毫秒到
+/// 秒级）或单箱掉数时，整机的流仍然连续、整机 GTI 切不掉，但只有部分探头在出数，
+/// 本底被低估——2023-08-31 那个 fa 1e-25 的"TGF"就是 Box C 先开机的那几毫秒
+/// （OPEN-QUESTIONS 第 10 条）。按机箱求交把这些时段剔出活时间。
+///
+/// 整段都没有事例的机箱在 [`gti_from_times`] 里退化成整段，不参与交集：
+/// 配置在这一段里本来就不变，另外两箱照常搜。
+pub fn gti_from_boxes(times_per_box: &[Vec<f64>], span_end: f64, budget: f64) -> Vec<[f64; 2]> {
+    let mut all: Vec<f64> = times_per_box.iter().flatten().copied().collect();
+    all.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let mut gti = gti_from_times(&all, span_end, budget);
+    for times in times_per_box {
+        gti = intersect(&gti, &gti_from_times(times, span_end, budget));
+    }
+    gti.retain(|s| s[1] - s[0] >= MIN_SEGMENT_SECONDS);
+    gti
+}
+
+/// 两组按时间排好、互不重叠的段求交。只擦边（长度为零）的不算。
+pub fn intersect(a: &[[f64; 2]], b: &[[f64; 2]]) -> Vec<[f64; 2]> {
+    let mut out = Vec::new();
+    let (mut i, mut j) = (0, 0);
+    while i < a.len() && j < b.len() {
+        let lo = a[i][0].max(b[j][0]);
+        let hi = a[i][1].min(b[j][1]);
+        if hi > lo {
+            out.push([lo, hi]);
+        }
+        if a[i][1] < b[j][1] { i += 1 } else { j += 1 }
+    }
+    out
 }
 
 fn shift(t0: MissionElapsedTime<HxmtHe>, dt: f64) -> MissionElapsedTime<HxmtHe> {
@@ -146,6 +217,14 @@ fn window_thresholds(t: &[f64], span_end: f64, budget: f64) -> Vec<(f64, f64)> {
         out.push((w_start, th));
         last = th;
         w_start = w_stop;
+    }
+    // 开头几个窗事例太少、前面又没有窗可沿用时，借后面第一个有数据的窗：
+    // 开机爬升时一个机箱先零星出几个事例（2022-03-19 T00 的 Box A 只有 6 个），
+    // 留成无穷就判不出它前面那段空白。
+    if let Some(first) = out.iter().map(|(_, th)| *th).find(|th| th.is_finite()) {
+        for (_, th) in out.iter_mut().take_while(|(_, th)| !th.is_finite()) {
+            *th = first;
+        }
     }
     out
 }
@@ -335,6 +414,109 @@ mod tests {
         let gti = gti_from_times(&t, 20.0, DEFAULT_FALSE_GAP_BUDGET);
         assert_eq!(gti, vec![[0.0, 20.0]], "速率变化不是缺口：{gti:?}");
     }
+    // ---- 按机箱的 GTI：配置在本底窗内不变 ----
+    //
+    // 三个机箱各自按同一条判据推 GTI，再与整机的取交集。机箱开关机不同步时，
+    // 只有一部分探头在出数的那段不是活时间（见 OPEN-QUESTIONS 第 10 条）。
+
+    /// 同速率、相位错开的流：三个机箱合并后不会出现零间隔（零间隔会让中位数为零、阈值变成无穷）。
+    fn shifted(rate: f64, from: f64, to: f64, phase: f64) -> Vec<f64> {
+        uniform(rate, from + phase / rate, to)
+    }
+
+    #[test]
+    fn intersection_of_segment_lists() {
+        let a = vec![[0.0, 10.0], [12.0, 20.0]];
+        let b = vec![[5.0, 15.0], [18.0, 30.0]];
+        assert_eq!(intersect(&a, &b), vec![[5.0, 10.0], [12.0, 15.0], [18.0, 20.0]]);
+        assert_eq!(intersect(&a, &[[0.0, 20.0]]), a, "与整段求交不变");
+        assert_eq!(intersect(&a, &[[10.0, 12.0]]), Vec::<[f64; 2]>::new(), "只擦边不算重叠");
+    }
+
+    /// 三个机箱都正常出数时，按机箱的结果与整机的逐位相同。
+    #[test]
+    fn boxes_all_on_give_the_whole_span() {
+        let boxes: Vec<Vec<f64>> = (0..3).map(|k| shifted(3000.0, 0.0, 30.0, k as f64 / 3.0)).collect();
+        assert_eq!(gti_from_boxes(&boxes, 30.0, DEFAULT_FALSE_GAP_BUDGET), vec![[0.0, 30.0]]);
+    }
+
+    /// 2023-08-31 那一类：Box C 先开，A/B 晚几十毫秒才出数。
+    /// 整机的流从 C 开机起就连续，整机 GTI 切不掉；按机箱就切得掉。
+    #[test]
+    fn a_box_that_starts_late_cuts_the_span_until_it_starts() {
+        let c = shifted(3000.0, 5.0, 30.0, 0.0);
+        let a = shifted(3000.0, 5.05, 30.0, 1.0 / 3.0);
+        let b = shifted(3000.0, 5.05, 30.0, 2.0 / 3.0);
+        let mut all: Vec<f64> = [a.clone(), b.clone(), c.clone()].concat();
+        all.sort_by(|x, y| x.partial_cmp(y).unwrap());
+        let whole = gti_from_times(&all, 30.0, DEFAULT_FALSE_GAP_BUDGET);
+        assert!((whole[0][0] - 5.0).abs() < 1e-3, "整机只看得到 C 的开机：{whole:?}");
+        let gti = gti_from_boxes(&[a, b, c], 30.0, DEFAULT_FALSE_GAP_BUDGET);
+        assert_eq!(gti.len(), 1, "{gti:?}");
+        assert!((gti[0][0] - 5.05).abs() < 1e-3, "该从最后一个机箱开机起：{gti:?}");
+    }
+
+    /// 一个机箱中途掉数 1 s（高压跌落、FIFO 以外的整箱停摆）也要切掉。
+    #[test]
+    fn a_box_dropping_out_mid_stream_is_cut() {
+        let a = shifted(3000.0, 0.0, 30.0, 1.0 / 3.0);
+        let b = shifted(3000.0, 0.0, 30.0, 2.0 / 3.0);
+        let mut c = uniform(3000.0, 0.0, 12.0);
+        c.extend(uniform(3000.0, 13.0, 30.0));
+        let gti = gti_from_boxes(&[a, b, c], 30.0, DEFAULT_FALSE_GAP_BUDGET);
+        assert_eq!(gti.len(), 2, "{gti:?}");
+        assert!((live(&gti) - 29.0).abs() < 0.01, "活时间该是 29 s：{gti:?}");
+    }
+
+    /// 2023-08-31 T08 的原样：小时开头仪器整整关着 150 s（一个事例都没有），
+    /// 然后 Box C 先开、A 晚 0.9 s、B 晚 2 s。没有数据的速率窗估不出阈值，
+    /// 缺口必须按有数据那一侧的速率判，否则开头这段永远切不掉。
+    #[test]
+    fn a_long_silent_start_is_judged_by_the_rate_after_it() {
+        let c = shifted(3000.0, 150.0, 300.0, 0.0);
+        let a = shifted(3000.0, 150.9, 300.0, 1.0 / 3.0);
+        let b = shifted(3000.0, 152.0, 300.0, 2.0 / 3.0);
+        let mut all: Vec<f64> = [a.clone(), b.clone(), c.clone()].concat();
+        all.sort_by(|x, y| x.partial_cmp(y).unwrap());
+        let whole = gti_from_times(&all, 300.0, DEFAULT_FALSE_GAP_BUDGET);
+        assert!((whole[0][0] - 150.0).abs() < 1e-3, "整机 GTI 该从 150 s 起：{whole:?}");
+        let gti = gti_from_boxes(&[a, b, c], 300.0, DEFAULT_FALSE_GAP_BUDGET);
+        assert!((gti[0][0] - 152.0).abs() < 1e-3, "该从最后一个机箱开机起：{gti:?}");
+    }
+
+    /// 同理，缺口前是一整个没数据的窗、缺口后才有数据时（仪器中途停摆很久再开）。
+    #[test]
+    fn a_long_interior_gap_after_sparse_data_is_cut() {
+        let mut t = shifted(3000.0, 0.0, 5.0, 0.0);
+        t.extend([20.0, 40.0]); // 停摆期间零星几个事例
+        t.extend(shifted(3000.0, 60.0, 100.0, 0.0));
+        let gti = gti_from_times(&t, 100.0, DEFAULT_FALSE_GAP_BUDGET);
+        assert!(live(&gti) < 46.0, "停摆的 55 s 该切掉：{gti:?}");
+    }
+
+    /// 开机爬升时各机箱先零星出几个事例、停一秒再正常出数（2022-03-19 T00 实测：
+    /// C 先出 75 个、停 1 s；B 晚 3.5 s；A 先出 6 个、停 1 s、晚 9 s 才正常）。
+    /// 求交后会剩几毫秒长的碎片——比本底窗还短的段估不出本底，要丢掉。
+    #[test]
+    fn segments_shorter_than_the_background_window_are_dropped() {
+        let mut a = shifted(3000.0, 9.0, 9.002, 0.0); // 6 个事例的小爆发
+        a.extend(shifted(3000.0, 10.02, 60.0, 0.0));
+        let b = shifted(3000.0, 3.5, 60.0, 1.0 / 3.0);
+        let c = shifted(3000.0, 0.0, 60.0, 2.0 / 3.0);
+        let gti = gti_from_boxes(&[a, b, c], 60.0, DEFAULT_FALSE_GAP_BUDGET);
+        assert!(gti.iter().all(|s| s[1] - s[0] >= MIN_SEGMENT_SECONDS), "{gti:?}");
+        assert!((gti[0][0] - 10.02).abs() < 1e-3, "该从 A 正常出数起：{gti:?}");
+    }
+
+    /// 整小时都没开的机箱不参与交集：配置在这一小时里本来就不变，
+    /// 另外两个机箱的数据照常搜，不能因为它把整小时丢掉。
+    #[test]
+    fn a_box_that_is_off_the_whole_time_is_ignored() {
+        let a = shifted(3000.0, 0.0, 30.0, 0.0);
+        let b = shifted(3000.0, 0.0, 30.0, 0.5);
+        let gti = gti_from_boxes(&[a, b, Vec::new()], 30.0, DEFAULT_FALSE_GAP_BUDGET);
+        assert_eq!(gti, vec![[0.0, 30.0]]);
+    }
 }
 
 /// 在真数据上量一小时的 GTI，用来回答"判据在真实事例流上切出多少段"。
@@ -445,4 +627,5 @@ mod real_data {
             );
         }
     }
+
 }
