@@ -43,6 +43,10 @@ use uom::si::time::second;
 /// 停一秒再正常出数，求交正好留下这种几毫秒的碎片。
 pub const MIN_SEGMENT_SECONDS: f64 = 1.0;
 
+/// 机箱配置变化（开机、关机、掉数）前后各切掉的时长：本底窗的半宽（搜索的
+/// `neighbor / 2`）。护带之外的试验窗，本底区都落在配置不变的一侧。
+pub const GUARD_SECONDS: f64 = 0.5;
+
 /// 每小时允许误判出的假缺口条数。
 pub const DEFAULT_FALSE_GAP_BUDGET: f64 = 1e-3;
 
@@ -152,22 +156,49 @@ pub fn gti_from_events_by_box(
         .collect()
 }
 
-/// 按机箱推 GTI：三个机箱各自用 [`gti_from_times`] 的同一条判据，再与整机的求交。
+/// 按机箱推 GTI：三个机箱各自用 [`gti_from_times`] 的同一条判据找出开机、关机、
+/// 掉数的时刻，在每个时刻前后各切 [`GUARD_SECONDS`]，再与整机的 GTI 求交。
+///
+/// 要求的是**本底窗内配置不变**，不是三箱都开：长时间只有两箱在出数（另一箱关机）
+/// 时配置同样不变，照常搜（2024-10-29 T06 那个闪电关联 TGF 就在 Box A 关机的时段里）。
 ///
 /// 搜索的本底估计假定本底窗（±0.5 s）里探头配置不变。机箱开关机不同步（毫秒到
 /// 秒级）或单箱掉数时，整机的流仍然连续、整机 GTI 切不掉，但只有部分探头在出数，
 /// 本底被低估——2023-08-31 那个 fa 1e-25 的"TGF"就是 Box C 先开机的那几毫秒
-/// （OPEN-QUESTIONS 第 10 条）。按机箱求交把这些时段剔出活时间。
+/// （OPEN-QUESTIONS 第 10 条）。变化时刻前后的护带把这些时段剔出活时间。
 ///
-/// 整段都没有事例的机箱在 [`gti_from_times`] 里退化成整段，不参与交集：
+/// 整段都没有事例的机箱在 [`gti_from_times`] 里退化成整段，没有端点、不产生护带：
 /// 配置在这一段里本来就不变，另外两箱照常搜。
 pub fn gti_from_boxes(times_per_box: &[Vec<f64>], span_end: f64, budget: f64) -> Vec<[f64; 2]> {
     let mut all: Vec<f64> = times_per_box.iter().flatten().copied().collect();
     all.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let mut gti = gti_from_times(&all, span_end, budget);
+
+    // 配置变化的时刻 = 各机箱自己的 GTI 的端点（开机、关机、掉数），整段的首尾不算。
+    // 每个变化时刻前后各切半个本底窗：护带外的任何试验窗，本底区都伸不过变化时刻。
+    let mut guards: Vec<[f64; 2]> = Vec::new();
     for times in times_per_box {
-        gti = intersect(&gti, &gti_from_times(times, span_end, budget));
+        for seg in gti_from_times(times, span_end, budget) {
+            for edge in [seg[0], seg[1]] {
+                if edge > 0.0 && edge < span_end {
+                    guards.push([(edge - GUARD_SECONDS).max(0.0), (edge + GUARD_SECONDS).min(span_end)]);
+                }
+            }
+        }
     }
+    guards.sort_by(|a, b| a[0].partial_cmp(&b[0]).unwrap());
+    let mut keep: Vec<[f64; 2]> = Vec::new();
+    let mut cursor = 0.0f64;
+    for g in &guards {
+        if g[0] > cursor {
+            keep.push([cursor, g[0]]);
+        }
+        cursor = cursor.max(g[1]);
+    }
+    if span_end > cursor {
+        keep.push([cursor, span_end]);
+    }
+    gti = intersect(&gti, &keep);
     gti.retain(|s| s[1] - s[0] >= MIN_SEGMENT_SECONDS);
     gti
 }
@@ -453,7 +484,10 @@ mod tests {
         assert!((whole[0][0] - 5.0).abs() < 1e-3, "整机只看得到 C 的开机：{whole:?}");
         let gti = gti_from_boxes(&[a, b, c], 30.0, DEFAULT_FALSE_GAP_BUDGET);
         assert_eq!(gti.len(), 1, "{gti:?}");
-        assert!((gti[0][0] - 5.05).abs() < 1e-3, "该从最后一个机箱开机起：{gti:?}");
+        assert!(
+            (gti[0][0] - (5.05 + GUARD_SECONDS)).abs() < 1e-3,
+            "该从最后一个机箱开机再过半个本底窗起：{gti:?}"
+        );
     }
 
     /// 一个机箱中途掉数 1 s（高压跌落、FIFO 以外的整箱停摆）也要切掉。
@@ -465,7 +499,10 @@ mod tests {
         c.extend(uniform(3000.0, 13.0, 30.0));
         let gti = gti_from_boxes(&[a, b, c], 30.0, DEFAULT_FALSE_GAP_BUDGET);
         assert_eq!(gti.len(), 2, "{gti:?}");
-        assert!((live(&gti) - 29.0).abs() < 0.01, "活时间该是 29 s：{gti:?}");
+        assert!(
+            (live(&gti) - (29.0 - 2.0 * GUARD_SECONDS)).abs() < 0.01,
+            "掉数的 1 s 加两侧各半个本底窗：{gti:?}"
+        );
     }
 
     /// 2023-08-31 T08 的原样：小时开头仪器整整关着 150 s（一个事例都没有），
@@ -481,7 +518,10 @@ mod tests {
         let whole = gti_from_times(&all, 300.0, DEFAULT_FALSE_GAP_BUDGET);
         assert!((whole[0][0] - 150.0).abs() < 1e-3, "整机 GTI 该从 150 s 起：{whole:?}");
         let gti = gti_from_boxes(&[a, b, c], 300.0, DEFAULT_FALSE_GAP_BUDGET);
-        assert!((gti[0][0] - 152.0).abs() < 1e-3, "该从最后一个机箱开机起：{gti:?}");
+        assert!(
+            (gti[0][0] - (152.0 + GUARD_SECONDS)).abs() < 1e-3,
+            "该从最后一个机箱开机再过半个本底窗起：{gti:?}"
+        );
     }
 
     /// 同理，缺口前是一整个没数据的窗、缺口后才有数据时（仪器中途停摆很久再开）。
@@ -505,10 +545,32 @@ mod tests {
         let c = shifted(3000.0, 0.0, 60.0, 2.0 / 3.0);
         let gti = gti_from_boxes(&[a, b, c], 60.0, DEFAULT_FALSE_GAP_BUDGET);
         assert!(gti.iter().all(|s| s[1] - s[0] >= MIN_SEGMENT_SECONDS), "{gti:?}");
-        assert!((gti[0][0] - 10.02).abs() < 1e-3, "该从 A 正常出数起：{gti:?}");
+        // 0–3.5 s 只有 C、3.5–9.0 s 是 B+C，各自都是稳定配置，照常搜；
+        // B 开机、A 的小爆发–停顿–正常出数这些变化连同两侧护带一起切掉
+        assert_eq!(gti.len(), 3, "{gti:?}");
+        assert!((gti[0][1] - (3.5 - GUARD_SECONDS)).abs() < 1e-3, "{gti:?}");
+        assert!((gti[1][0] - (3.5 + GUARD_SECONDS)).abs() < 1e-3, "{gti:?}");
+        assert!((gti[1][1] - (9.0 - GUARD_SECONDS)).abs() < 1e-3, "{gti:?}");
+        assert!((gti[2][0] - (10.02 + GUARD_SECONDS)).abs() < 1e-3, "{gti:?}");
     }
 
-    /// 整小时都没开的机箱不参与交集：配置在这一小时里本来就不变，
+    /// 2024-10-29 T06 的原样：Box A 关着、B 和 C 稳定出数几十分钟，其间有一个
+    /// 闪电关联的 TGF。双机箱的配置同样不变，只切配置变化前后各半个本底窗，
+    /// 不能因为 A 在这一小时里开过就把双机箱的那段整个丢掉。
+    #[test]
+    fn a_stable_two_box_configuration_is_kept() {
+        let a = shifted(3000.0, 0.0, 20.0, 0.0); // A 在 20 s 关机
+        let b = shifted(3000.0, 0.0, 60.0, 1.0 / 3.0);
+        let c = shifted(3000.0, 0.0, 60.0, 2.0 / 3.0);
+        let gti = gti_from_boxes(&[a, b, c], 60.0, DEFAULT_FALSE_GAP_BUDGET);
+        assert_eq!(gti.len(), 2, "{gti:?}");
+        assert!(
+            (live(&gti) - (60.0 - 2.0 * GUARD_SECONDS)).abs() < 0.01,
+            "只该切 A 关机前后各半个本底窗：{gti:?}"
+        );
+    }
+
+    /// 整小时都没开的机箱没有端点、不产生护带：配置在这一小时里本来就不变，
     /// 另外两个机箱的数据照常搜，不能因为它把整小时丢掉。
     #[test]
     fn a_box_that_is_off_the_whole_time_is_ignored() {
