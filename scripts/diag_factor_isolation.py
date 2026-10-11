@@ -20,7 +20,7 @@ from scipy.interpolate import RegularGridInterpolator
 L_CYCLES_TO_SEC = 16e-6
 B_THRESHOLD = 20.0
 NEEDED = ["date", "box", "det", "PHO", "Wide", "Large", "Sci_1s", "L_cycles", "Dt", "Lat", "Lon"]
-CACHE = "/Volumes/Graphite/blink_clean_relaxed"
+CACHE = "/Volumes/Graphite/work/blink/blink_clean_relaxed"
 
 
 def unwrap_large_v2(pho, large, wide, sci, l_cycles, dt, C):

@@ -36,7 +36,7 @@ import pyarrow.parquet as pq
 
 HEATMAP_NPZ = "n_below_study/v5_npz/C_2D_heatmap.npz"
 AACGM_NPZ = "n_below_study/aacgm_grid_2020.npz"
-CACHE_DIR = "/Volumes/Graphite/blink_clean_relaxed"
+CACHE_DIR = "/Volumes/Graphite/work/blink/blink_clean_relaxed"
 CACHE_GLOB = "clean_relaxed_{year}.parquet"
 YEARS = list(range(2017, 2027))
 

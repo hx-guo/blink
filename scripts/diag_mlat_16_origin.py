@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mc
 from scipy.interpolate import RegularGridInterpolator
 
-CACHE = "/Volumes/Graphite/blink_clean_relaxed"
+CACHE = "/Volumes/Graphite/work/blink/blink_clean_relaxed"
 
 
 def main():

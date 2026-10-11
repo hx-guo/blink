@@ -24,7 +24,7 @@ from scipy.interpolate import RegularGridInterpolator
 L = 16e-6; MIN_C_SLACK = 50.0
 NEEDED = ["date","box","det","met_sec","PHO","Wide","Large","Sci_1s",
           "L_cycles","Dt","HV","Lat","Lon","ACD_sum","PM_0","PM_1","PM_2"]
-CACHE_FILE = "/Volumes/Graphite/blink_clean_relaxed/clean_relaxed_2020.parquet"
+CACHE_FILE = "/Volumes/Graphite/work/blink/blink_clean_relaxed/clean_relaxed_2020.parquet"
 
 # Window: 2020-05-25 09:17 to 09:37 (20 min, centered on the spike region)
 # MET = seconds since 2012-01-01 UTC.

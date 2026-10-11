@@ -31,7 +31,7 @@ N_PARAMS = 12
 
 NPZ_HEATMAP = "n_below_study/v5_npz/C_2D_heatmap.npz"
 AACGM_NPZ   = "n_below_study/aacgm_grid_2020.npz"
-CACHE_DIR   = "/Volumes/Graphite/blink_clean_relaxed"
+CACHE_DIR   = "/Volumes/Graphite/work/blink/blink_clean_relaxed"
 YEARS       = list(range(2017, 2027))
 L_PER_CYCLE = 16e-6
 C_BASELINE  = 150.0

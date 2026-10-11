@@ -17,7 +17,7 @@ from scipy.interpolate import RegularGridInterpolator
 
 L = 16e-6; MIN_C_SLACK = 50.0
 NEEDED = ["date","box","det","PHO","Wide","Large","Sci_1s","L_cycles","Dt","Lat","Lon","ACD_sum"]
-CACHE = "/Volumes/Graphite/blink_clean_relaxed"
+CACHE = "/Volumes/Graphite/work/blink/blink_clean_relaxed"
 B_THRESHOLD = 20.0
 
 

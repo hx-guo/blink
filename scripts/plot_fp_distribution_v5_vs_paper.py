@@ -16,7 +16,7 @@ laid over v4 and the paper-era search. The generations differ by pipeline:
             from mask-displaced hours are gone (6945 -> 4248 significant).
 
 Inputs are day,fpy,assoc,coinc CSVs (one row per candidate; day = YYYYMMDD):
-  paper_catalog.csv  from /Volumes/Graphite/blink.db (paper-era catalog)
+  paper_catalog.csv  from /Volumes/Graphite/work/blink/blink.db (paper-era catalog)
   tgfs_v4.csv        from the v4 tgfs.json (server extraction)
   tgfs_v5.csv        from the v5 tgfs.json (server extraction)
 

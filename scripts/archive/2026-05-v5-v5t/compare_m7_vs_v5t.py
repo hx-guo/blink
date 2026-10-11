@@ -34,7 +34,7 @@ from scipy.stats import skew
 
 L = 16e-6
 MIN_C_SLACK = 50.0
-OLD_CACHE = "/Volumes/Graphite/blink_clean_relaxed_v1_48col"
+OLD_CACHE = "/Volumes/Graphite/work/blink/blink_clean_relaxed_v1_48col"
 NEEDED = ["date","box","det","PHO","Wide","Large","Sci_1s","L_cycles","Dt",
           "Lat","Lon",
           "Sci_pure_1s","Sci_ACD1_1s","Sci_ACDN_1s"]

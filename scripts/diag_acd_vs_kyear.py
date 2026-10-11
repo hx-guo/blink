@@ -20,7 +20,7 @@ from scipy.stats import pearsonr
 
 L = 16e-6
 NEEDED = ["date","box","det","PHO","Wide","Large","Sci_1s","L_cycles","Dt","Lat","Lon","ACD_sum"]
-CACHE = "/Volumes/Graphite/blink_clean_relaxed"
+CACHE = "/Volumes/Graphite/work/blink/blink_clean_relaxed"
 B_THRESHOLD = 20.0
 
 

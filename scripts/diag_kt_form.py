@@ -19,7 +19,7 @@ from scipy.interpolate import RegularGridInterpolator
 from scipy.optimize import curve_fit
 
 L = 16e-6; NEEDED = ["date","box","det","PHO","Wide","Large","Sci_1s","L_cycles","Dt","Lat","Lon"]
-CACHE = "/Volumes/Graphite/blink_clean_relaxed"
+CACHE = "/Volumes/Graphite/work/blink/blink_clean_relaxed"
 
 
 def unwrap(pho, large, wide, sci, lc, dt, C):

@@ -29,7 +29,7 @@ from scipy.interpolate import RegularGridInterpolator
 
 NPZ = "n_below_study/v5_npz/C_2D_heatmap.npz"
 GRID = "n_below_study/aacgm_grid_2020.npz"
-CACHE = "/Volumes/Graphite/blink_clean_relaxed"
+CACHE = "/Volumes/Graphite/work/blink/blink_clean_relaxed"
 NEEDED = ["date","box","det","PHO","Wide","Large","Sci_1s","L_cycles","Dt","Lat","Lon"]
 L = 16e-6   # cycle period seconds
 T0 = np.datetime64("2017-06-22")

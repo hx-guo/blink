@@ -13,7 +13,7 @@
 #   - 2024: still building on hlogin (build_clean_cache.py) — picked up if ready
 set -euo pipefail
 
-CACHE=/Volumes/Graphite/blink_clean_relaxed
+CACHE=/Volumes/Graphite/work/blink/blink_clean_relaxed
 NPZ=n_below_study/v5_npz
 GRID=n_below_study/aacgm_grid_2020.npz
 SRV='hlogin08:/scratchfs/gecam/guohx/blink/n_below_study'

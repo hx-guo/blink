@@ -8,7 +8,7 @@ integral out to fpy=3.16e11 (the "Estimated TGFs" of the paper); the v6
 associated curve and fit are drawn as the independent slope anchor.
 
 Inputs are day,fpy,assoc,coinc CSVs:
-  paper_catalog.csv  from /Volumes/Graphite/blink.db (paper-era catalog)
+  paper_catalog.csv  from /Volumes/Graphite/work/blink/blink.db (paper-era catalog)
   tgfs_v6.csv        adds neighbors_10min,is_train (train cut applied here)
 
 usage: plot_powerlaw_paper_vs_v6.py <paper.csv> <v6.csv> [-o out.pdf]

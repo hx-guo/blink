@@ -11,7 +11,7 @@ entire 8.9-year dataset rather than one half-year.
 
 Usage:
     python3 plot_v5_scatter_sampled.py \
-        --cache-dir /Volumes/Graphite/blink_clean_relaxed \
+        --cache-dir /Volumes/Graphite/work/blink/blink_clean_relaxed \
         --full-npz n_below_study/v5_npz/v5_agg_full.npz \
         --aacgm-grid n_below_study/aacgm_grid_2020.npz \
         --rowgroups-per-file 10 --max-points 1000000 \
@@ -92,7 +92,7 @@ def process_rows(df, interp, calib):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--cache-dir", default="/Volumes/Graphite/blink_clean_relaxed")
+    p.add_argument("--cache-dir", default="/Volumes/Graphite/work/blink/blink_clean_relaxed")
     p.add_argument("--calib", default="n_below_study/v5_npz/v5t_calib.npz")
     p.add_argument("--aacgm-grid", default="n_below_study/aacgm_grid_2020.npz")
     p.add_argument("--rowgroups-per-file", type=int, default=10)

@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 from scipy.interpolate import RegularGridInterpolator
 
 L = 16e-6
-CACHE = "/Volumes/Graphite/blink_clean_relaxed"
+CACHE = "/Volumes/Graphite/work/blink/blink_clean_relaxed"
 NEEDED = ["date","box","det","PHO","Wide","Large","Sci_1s","L_cycles","Dt","Lat","Lon"]
 BOX_ID = {"a": 0, "b": 1, "c": 2, "A": 0, "B": 1, "C": 2}
 T_ANCHOR = 4.0

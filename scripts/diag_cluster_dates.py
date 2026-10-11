@@ -10,7 +10,7 @@ import numpy as np
 import pyarrow.parquet as pq
 import pandas as pd
 
-files = [f for f in sorted(glob.glob("/Volumes/Graphite/blink_clean_relaxed/clean_relaxed_20*.parquet"))
+files = [f for f in sorted(glob.glob("/Volumes/Graphite/work/blink/blink_clean_relaxed/clean_relaxed_20*.parquet"))
          if "sample" not in f]
 SEGS = [("1: <150", lambda s: s < 150),
         ("2: 150-350", lambda s: (s >= 150) & (s < 350)),

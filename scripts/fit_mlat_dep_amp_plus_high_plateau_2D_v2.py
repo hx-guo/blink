@@ -36,7 +36,7 @@ from scipy.interpolate import RegularGridInterpolator
 from scipy.optimize import least_squares
 
 NPZ = "n_below_study/v5_npz/C_2D_heatmap.npz"
-CACHE_DIR = "/Volumes/Graphite/blink_clean_relaxed"
+CACHE_DIR = "/Volumes/Graphite/work/blink/blink_clean_relaxed"
 AACGM = "n_below_study/aacgm_grid_2020.npz"
 L_PER_CYCLE = 16e-6
 T0 = np.datetime64("2017-06-22")

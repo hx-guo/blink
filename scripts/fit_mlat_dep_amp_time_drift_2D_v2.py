@@ -29,7 +29,7 @@ from scipy.optimize import least_squares
 ROOT = Path("/Users/skyair/Developer/ihep/blink")
 NPZ_HEATMAP = ROOT / "n_below_study/v5_npz/C_2D_heatmap.npz"
 NPZ_AACGM = ROOT / "n_below_study/aacgm_grid_2020.npz"
-CACHE_TEMPLATE = "/Volumes/Graphite/blink_clean_relaxed/clean_relaxed_{year}.parquet"
+CACHE_TEMPLATE = "/Volumes/Graphite/work/blink/blink_clean_relaxed/clean_relaxed_{year}.parquet"
 PLOT_OUT = ROOT / "plots/fit_mlat_dep_amp_time_drift_2D_v2.png"
 
 L_CYCLE_S = 16e-6

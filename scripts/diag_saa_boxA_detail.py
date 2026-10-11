@@ -17,7 +17,7 @@ from scipy.interpolate import RegularGridInterpolator
 L = 16e-6; MIN_C_SLACK = 50.0
 NEEDED = ["date","box","det","met_sec","PHO","Wide","Large","Sci_1s",
           "L_cycles","Dt","HV","Lat","Lon","ACD_sum","PM_0","PM_1","PM_2"]
-CACHE = "/Volumes/Graphite/blink_clean_relaxed/clean_relaxed_2019.parquet"
+CACHE = "/Volumes/Graphite/work/blink/blink_clean_relaxed/clean_relaxed_2019.parquet"
 TARGET_DATE = "2019-08-15"
 
 

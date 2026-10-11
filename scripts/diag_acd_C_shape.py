@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 
 L = 16e-6
 NEEDED = ["box","det","PHO","Wide","Large","Sci_1s","L_cycles","Dt","ACD_sum"]
-CACHE = "/Volumes/Graphite/blink_clean_relaxed"
+CACHE = "/Volumes/Graphite/work/blink/blink_clean_relaxed"
 
 
 def unwrap_v2(pho, large, wide, sci, lc, dt, C):

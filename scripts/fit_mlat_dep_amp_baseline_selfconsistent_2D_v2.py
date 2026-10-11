@@ -25,7 +25,7 @@ from scipy.optimize import least_squares
 ROOT = Path("/Users/skyair/Developer/ihep/blink")
 NPZ = ROOT / "n_below_study/v5_npz/C_2D_heatmap.npz"
 AACGM = ROOT / "n_below_study/aacgm_grid_2020.npz"
-CACHE_DIR = Path("/Volumes/Graphite/blink_clean_relaxed")
+CACHE_DIR = Path("/Volumes/Graphite/work/blink/blink_clean_relaxed")
 CACHE_GLOB = "clean_relaxed_{year}.parquet"
 PLOT_PATH = ROOT / "plots/fit_mlat_dep_amp_baseline_selfconsistent_2D_v2.png"
 YEARS = list(range(2017, 2027))  # 2017..2026

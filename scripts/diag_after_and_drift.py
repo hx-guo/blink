@@ -89,7 +89,7 @@ def collect(args, interp, dates, s_det_daily, k_global, pop_median):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--cache-dir", default="/Volumes/Graphite/blink_clean_relaxed")
+    p.add_argument("--cache-dir", default="/Volumes/Graphite/work/blink/blink_clean_relaxed")
     p.add_argument("--full-npz", default="n_below_study/v5_npz/v5_agg_full.npz")
     p.add_argument("--aacgm-grid", default="n_below_study/aacgm_grid_2020.npz")
     p.add_argument("--rowgroups-per-file", type=int, default=8)

@@ -11,7 +11,7 @@ import pyarrow.parquet as pq
 from scipy.interpolate import RegularGridInterpolator
 
 L = 16e-6
-CACHE = "/Volumes/Graphite/blink_clean_relaxed"
+CACHE = "/Volumes/Graphite/work/blink/blink_clean_relaxed"
 ACD_PATH = "/Users/skyair/Developer/ihep/astro_sift/astro_sift/satellites/hxmt/acd.txt"
 NEEDED = ["date","box","det","PHO","Wide","Large","Sci_1s","L_cycles","Dt","Lat","Lon"]
 

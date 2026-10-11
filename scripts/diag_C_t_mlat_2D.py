@@ -20,7 +20,7 @@ import matplotlib.dates as mdates
 from scipy.interpolate import RegularGridInterpolator
 
 L = 16e-6
-CACHE = "/Volumes/Graphite/blink_clean_relaxed"
+CACHE = "/Volumes/Graphite/work/blink/blink_clean_relaxed"
 NEEDED = ["date","box","det","PHO","Wide","Large","Sci_1s","L_cycles","Dt","Lat","Lon"]
 
 

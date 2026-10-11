@@ -20,7 +20,7 @@ from scipy.optimize import least_squares
 import pyarrow.parquet as pq
 
 NPZ = "/Users/skyair/Developer/ihep/blink/n_below_study/v5_npz/C_2D_heatmap.npz"
-CACHE_DIR = "/Volumes/Graphite/blink_clean_relaxed"
+CACHE_DIR = "/Volumes/Graphite/work/blink/blink_clean_relaxed"
 AACGM_NPZ = "/Users/skyair/Developer/ihep/blink/n_below_study/aacgm_grid_2020.npz"
 L_CYCLES_TO_SEC = 16e-6
 T0 = np.datetime64("2017-06-22")

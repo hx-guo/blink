@@ -48,7 +48,7 @@ def unwrap_large_v2(pho, large, wide, sci, l_cycles, dt, C):
 
 def main():
     ap=argparse.ArgumentParser()
-    ap.add_argument("--cache-dir", default="/Volumes/Graphite/blink_clean_relaxed")
+    ap.add_argument("--cache-dir", default="/Volumes/Graphite/work/blink/blink_clean_relaxed")
     ap.add_argument("--full-npz", default="n_below_study/v5_npz/v5_agg_full.npz")
     ap.add_argument("--aacgm-grid", default="n_below_study/aacgm_grid_2020.npz")
     ap.add_argument("--rowgroups-per-file", type=int, default=8)
