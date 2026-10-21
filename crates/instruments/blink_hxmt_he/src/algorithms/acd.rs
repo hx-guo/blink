@@ -61,6 +61,60 @@ pub fn acd_counts(events: &[Event], start_met: f64, stop_met: f64) -> AcdCounts 
     }
 }
 
+/// 顶部 ACD 的标志位下标（其余 12 块在侧面）。来源：hx-guo/astro_sift
+/// `plot/marker/detector.py`，HXMT 论文 6.1 节沿用。
+pub const TOP_ACDS: [usize; 6] = [4, 5, 10, 11, 16, 17];
+
+/// 电子束检验的参考：闪电关联 TGF 中，"只有顶部 ACD 着火"占"只有顶部或只有
+/// 侧面着火"事例的比例（HXMT 论文 6.1 节，v9 目录 1071 个关联 TGF 实测 0.56）。
+/// 定成常数而不在线重估：实时管线拿不到闪电数据，参考样本也不该随目录漂移。
+pub const TOP_SHARE_REFERENCE: f64 = 0.56;
+
+/// 电子束判据：单边二项 `P < 1e-9`。v9 目录里 7 个电子束都在 1e-9 以下，
+/// 其余 TGF 最小 2.5e-6，中间是空的。
+pub const BEAM_P_THRESHOLD: f64 = 1e-9;
+
+/// 候选窗内只有顶部 ACD 着火、只有侧面 ACD 着火的事例数。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TopSide {
+    pub top_only: u32,
+    pub side_only: u32,
+}
+
+/// 对时间有序的 kept 事例统计候选窗 [start, stop]（闭区间）的顶/侧 ACD 计数。
+pub fn acd_top_side(events: &[Event], start_met: f64, stop_met: f64) -> TopSide {
+    let lo = events.partition_point(|e| e.time().met() < start_met);
+    let hi = events.partition_point(|e| e.time().met() <= stop_met);
+    let mut counts = TopSide {
+        top_only: 0,
+        side_only: 0,
+    };
+    for event in &events[lo..hi] {
+        let top = TOP_ACDS.iter().any(|&i| event.acds[i]);
+        let side = event
+            .acds
+            .iter()
+            .enumerate()
+            .any(|(i, &fired)| fired && !TOP_ACDS.contains(&i));
+        match (top, side) {
+            (true, false) => counts.top_only += 1,
+            (false, true) => counts.side_only += 1,
+            _ => {}
+        }
+    }
+    counts
+}
+
+/// 电子从上方进来时"只有顶部着火"的事例异常多：在参考比例下观测到至少这么多
+/// 的单边二项概率。没有只顶/只侧的事例时为 1。
+pub fn beam_probability(counts: TopSide) -> f64 {
+    blink_algorithms::binomial::sf_at_least(
+        counts.top_only + counts.side_only,
+        counts.top_only,
+        TOP_SHARE_REFERENCE,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -116,5 +170,35 @@ mod tests {
         assert_eq!(counts.n_acd, 1);
         assert_eq!(counts.n_bg, 1);
         assert_eq!(counts.n_acd_bg, 1);
+    }
+
+    #[test]
+    fn top_and_side_are_counted_exclusively() {
+        let with = |met: f64, paddles: &[usize]| {
+            let mut e = event(met, 0);
+            paddles.iter().for_each(|&i| e.acds[i] = true);
+            e
+        };
+        let events = vec![
+            with(9.0, &[4]),        // 窗外
+            with(10.0, &[4]),       // 只顶
+            with(10.0002, &[5, 17]), // 只顶（两块）
+            with(10.0004, &[0]),    // 只侧
+            with(10.0006, &[4, 0]), // 顶+侧：不计
+            with(10.0008, &[]),     // 无 ACD
+        ];
+        let counts = acd_top_side(&events, 10.0, 10.001);
+        assert_eq!(counts, TopSide { top_only: 2, side_only: 1 });
+    }
+
+    #[test]
+    fn a_beam_from_the_top_passes_and_a_tgf_does_not() {
+        // 电子束：60 个只顶、1 个只侧（40 顶 2 侧还只有 1.4e-8，不够）
+        let beam = beam_probability(TopSide { top_only: 60, side_only: 1 });
+        assert!(beam < BEAM_P_THRESHOLD, "{beam}");
+        // 典型 TGF：只顶/只侧接近参考比例
+        let tgf = beam_probability(TopSide { top_only: 5, side_only: 4 });
+        assert!(tgf > 0.1, "{tgf}");
+        assert_eq!(beam_probability(TopSide { top_only: 0, side_only: 0 }), 1.0);
     }
 }
