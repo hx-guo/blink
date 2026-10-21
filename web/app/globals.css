@@ -1,26 +1,249 @@
 @import "tailwindcss";
 
+/* 颜色一律按角色取 token；数值来自 dataviz 参考调色板（浅/深两套各自选定，不是自动反色） */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: light;
+  --page: #ffffff;
+  --surface: #ffffff;
+  --text-primary: #262326;
+  --text-secondary: #555255;
+  --text-muted: #939193;
+  --grid: #e6e6e6;
+  --axis: #cdcdcd;
+  --border: #e6e6e6;
+  --border-strong: #cdcdcd;
+  --wash: rgba(38, 35, 38, 0.04);
+  --link: #ae4b3b;
+  --accent: #ae4b3b;
+  --accent-strong: #bd4234;
+  --accent-soft: #f3dcd8;
+  --land: #cdcdcd;
+  --land-edge: #ffffff;
+  --saa: #e7b9b4;
+  /* 仪器固定配色：颜色跟随仪器，不跟随排序；首发只有 HXMT，用强调色 */
+  --inst-1: #ae4b3b;
+  --inst-2: #2a78d6;
+  --inst-3: #1baf7a;
+  /* 光变曲线：全部事例 / ACD 符合事例 */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-critical: #d03b3b;
+  --banner: #fbefe0;
 }
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
 @media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --page: #161415;
+    --surface: #1e1b1d;
+    --text-primary: #efedef;
+    --text-secondary: #c2bfc2;
+    --text-muted: #8d8a8d;
+    --grid: #2f2b2e;
+    --axis: #45414a;
+    --border: #2f2b2e;
+    --border-strong: #45414a;
+    --wash: rgba(255, 255, 255, 0.05);
+    --link: #e08b7e;
+    --accent: #d9705f;
+    --accent-strong: #e07b6a;
+    --accent-soft: #4a2a25;
+    --land: #3a3639;
+    --land-edge: #1e1b1d;
+    --saa: #6b3a33;
+    --inst-1: #d9705f;
+    --inst-2: #3987e5;
+    --inst-3: #199e70;
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --banner: #3a2f20;
   }
 }
+:root[data-theme="dark"] {
+color-scheme: dark;
+  --page: #161415;
+  --surface: #1e1b1d;
+  --text-primary: #efedef;
+  --text-secondary: #c2bfc2;
+  --text-muted: #8d8a8d;
+  --grid: #2f2b2e;
+  --axis: #45414a;
+  --border: #2f2b2e;
+  --border-strong: #45414a;
+  --wash: rgba(255, 255, 255, 0.05);
+  --link: #e08b7e;
+  --accent: #d9705f;
+  --accent-strong: #e07b6a;
+  --accent-soft: #4a2a25;
+  --land: #3a3639;
+  --land-edge: #1e1b1d;
+  --saa: #6b3a33;
+  --inst-1: #d9705f;
+  --inst-2: #3987e5;
+  --inst-3: #199e70;
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --banner: #3a2f20;
+}
 
+html,
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--page);
+  color: var(--text-primary);
+  font-family: var(--font-inter), system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+a {
+  color: var(--link);
+}
+a {
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  border: 2px solid var(--border-strong);
+  border-radius: 6px;
+  padding: 5px 16px;
+  font-size: 15px;
+  font-weight: 500;
+  background: var(--surface);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.chip .dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: var(--axis);
+}
+.chip[aria-pressed="true"] {
+  border-color: var(--accent);
+}
+.chip[aria-pressed="true"] .dot {
+  background: var(--accent);
+}
+.grid-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+}
+.grid-table th,
+.grid-table td {
+  border-right: 2px solid var(--border);
+  border-bottom: 2px solid var(--border);
+  text-align: center;
+  padding: 10px 6px;
+  font-weight: 600;
+}
+.grid-table th:first-child,
+.grid-table td:first-child {
+  border-left: 2px solid var(--border);
+}
+.grid-table thead th {
+  border-top: 2px solid var(--border);
+  font-size: 15px;
+}
+.grid-table thead th .unit {
+  display: block;
+  font-size: 10px;
+  color: var(--accent);
+  font-weight: 500;
+}
+.grid-table tbody tr:hover td {
+  background: var(--wash);
+}
+.page-btn {
+  min-width: 32px;
+  height: 32px;
+  border: 2px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 500;
+  padding: 0 8px;
+}
+.page-btn[aria-current="page"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.page-btn:disabled {
+  opacity: 0.4;
+}
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.muted {
+  color: var(--text-muted);
+}
+.secondary {
+  color: var(--text-secondary);
+}
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+.tooltip {
+  position: absolute;
+  pointer-events: none;
+  background: var(--surface);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  white-space: nowrap;
+  z-index: 10;
+}
+table.data {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+table.data th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--axis);
+  padding: 6px 8px;
+  white-space: nowrap;
+}
+table.data td {
+  border-bottom: 1px solid var(--grid);
+  padding: 5px 8px;
+  white-space: nowrap;
+}
+table.data.wrap td {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+table.data tbody tr:hover {
+  background: var(--wash);
+}
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 8px;
+  color: var(--text-secondary);
+}
+.control {
+  background: var(--surface);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 13px;
 }

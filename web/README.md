@@ -1,36 +1,28 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# TGF catalog website
 
-## Getting Started
-
-First, run the development server:
+Static site (Next.js, `output: "export"`) for the real-time TGF pipeline. It only reads the files that
+`blink export` writes to `public/data/`; it computes nothing itself. See `docs/tgf-pipeline-design.md`.
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+pnpm install
+# real data
+blink export <catalog dirs> --registry <registry> --data data -o web/public/data [--public-only]
+# or demo data (catalog v6 with simulated light curves; the pages show a demo banner)
+python3 web/scripts/make_demo_data.py          # from the repository root
+pnpm dev                                       # http://localhost:3000
+pnpm build                                     # static site in out/; BASE_PATH=/sub/path for a sub-path
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The pages fetch `data/*.json` and draw with D3 in the browser; the build reads no data. Deploy `out/`
+once, then let the pipeline replace only `out/data/` (or wherever `data/` is served) on each update.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Event links use query strings (`/tgf/?name=170623AA`, `/cand/?id=...`, `/instrument/?slug=...`), which
+work on any static host. With a rewrite on the server the path form works too, e.g. nginx:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```nginx
+location ~ ^/tgf/[^/]+/?$ { try_files /tgf/index.html =404; }
+```
 
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+`--public-only` builds the public site (instruments listed in the registry's
+`public_instruments.txt`); without it, the internal site shows every instrument and marks the
+unvalidated ones.
