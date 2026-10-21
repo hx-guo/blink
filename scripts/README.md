@@ -5,6 +5,7 @@ Analysis, plotting and job scripts around the Rust crates. Run them from the rep
 
 | Directory | Contents |
 |---|---|
+| `pipeline/` | Real-time TGF pipeline: `realtime/` (cron run, trial run), `purity.py`, `validate_vet_v9.py`, `check_registry.py` |
 | `hxmt_tgf/` | HXMT/HE TGF search and catalog studies (false-alarm distributions, REP/TGF separation, old search jobs) |
 | `svom/`, `gecam/`, `grid/`, `gbm/` | TGF studies of the other instruments |
 | `saturation/` | HXMT/HE saturation: 1B time reconstruction, gap filling, science-rate and ACD models, validation |
