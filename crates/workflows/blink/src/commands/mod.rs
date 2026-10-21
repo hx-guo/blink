@@ -1,5 +1,6 @@
 pub mod acd_audit;
 pub mod catalog;
+pub mod catalog_pipeline;
 pub mod compare;
 pub mod detect;
 pub mod dump;

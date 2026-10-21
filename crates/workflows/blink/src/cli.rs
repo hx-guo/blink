@@ -112,16 +112,39 @@ pub enum TopCommands {
         #[arg(long, default_value = "csi")]
         scint: String,
     },
-    /// Catalog stage: pool-level REP train removal, then the paper selection
-    /// criteria (fa <= 1e-5, or fa <= 1 with lightning association).
-    /// Input: tgfs.json from `blink wwlln`. Output: catalog CSV.
+    /// Catalog stage. Two modes:
+    /// `-o CSV`: paper catalog from tgfs.json of `blink wwlln` (train removal, then
+    /// fa <= 1e-5, or fa <= 1 with lightning association).
+    /// `--out-dir DIR`: real-time pipeline catalog from the daily signals/hours/vet
+    /// files (train removal, fa <= 1e-5, GRB removal, final/provisional status);
+    /// writes catalog.csv, rejected.csv and manifest.json.
     Catalog {
-        /// Enriched candidate list from `blink wwlln`
+        /// Enriched candidate list from `blink wwlln` (-o mode)
         #[arg(default_value = "tgfs.json")]
         input: PathBuf,
-        /// Output catalog CSV path
-        #[arg(long, short = 'o')]
-        out: PathBuf,
+        /// Output catalog CSV path (paper mode)
+        #[arg(long, short = 'o', required_unless_present = "out_dir", conflicts_with = "out_dir")]
+        out: Option<PathBuf>,
+        /// Output directory (pipeline mode)
+        #[arg(long)]
+        out_dir: Option<PathBuf>,
+        /// Root of the daily files (pipeline mode)
+        #[arg(long, default_value = "data")]
+        data: PathBuf,
+        /// Train threshold: candidates with more neighbors within ±10 min are removed
+        /// (pipeline mode). Fixed, so that a growing pool does not move it.
+        #[arg(long, default_value_t = blink_algorithms::train::TRAIN_THRESHOLD)]
+        train_threshold: u32,
+        /// Days after which an hour without data counts as settled (pipeline mode); before
+        /// that its neighbours stay provisional, since the data may still arrive
+        #[arg(long, default_value_t = crate::commands::catalog_pipeline::DEFAULT_SETTLE_DAYS)]
+        settle_days: i64,
+        /// Derive the train threshold from the pool as `blink wwlln` does (pipeline mode)
+        #[arg(long, conflicts_with = "train_threshold")]
+        train_threshold_from_pool: bool,
+        /// Instrument (pipeline mode)
+        #[arg(long, value_enum, default_value_t = Instrument::HxmtHe)]
+        instrument: Instrument,
     },
 }
 

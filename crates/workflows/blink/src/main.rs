@@ -261,8 +261,34 @@ fn main() {
                 commands::vet::cmd_vet_days(from, to, workers, worker, max_fa, force);
             }
         }
-        TopCommands::Catalog { input, out } => {
-            commands::catalog::cmd_catalog(&input, &out);
-        }
+        TopCommands::Catalog {
+            input,
+            out,
+            out_dir,
+            data,
+            train_threshold,
+            train_threshold_from_pool,
+            settle_days,
+            instrument,
+        } => match (out, out_dir) {
+            (Some(out), _) => commands::catalog::cmd_catalog(&input, &out),
+            (None, Some(dir)) => {
+                use commands::catalog_pipeline::cmd_catalog_pipeline as run;
+                let t = (!train_threshold_from_pool).then_some(train_threshold);
+                match instrument {
+                    Instrument::HxmtHe => run::<blink_hxmt_he::types::HxmtHe>(&data, &dir, t, settle_days),
+                    Instrument::SvomGrm => run::<blink_svom_grm::types::SvomGrm>(&data, &dir, t, settle_days),
+                    Instrument::FermiGbm => run::<blink_fermi_gbm::types::FermiGbm>(&data, &dir, t, settle_days),
+                    Instrument::Grid02 => run::<blink_grid::types::Grid02>(&data, &dir, t, settle_days),
+                    Instrument::Grid03b => run::<blink_grid::types::Grid03B>(&data, &dir, t, settle_days),
+                    Instrument::Grid04 => run::<blink_grid::types::Grid04>(&data, &dir, t, settle_days),
+                    Instrument::Grid07 => run::<blink_grid::types::Grid07>(&data, &dir, t, settle_days),
+                    Instrument::GecamA => run::<blink_gecam::types::GecamA>(&data, &dir, t, settle_days),
+                    Instrument::GecamB => run::<blink_gecam::types::GecamB>(&data, &dir, t, settle_days),
+                    Instrument::GecamC => run::<blink_gecam::types::GecamC>(&data, &dir, t, settle_days),
+                }
+            }
+            (None, None) => unreachable!("clap requires -o or --out-dir"),
+        },
     }
 }

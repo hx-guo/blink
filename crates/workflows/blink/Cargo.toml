@@ -11,6 +11,7 @@ blink_fermi_gbm = { version = "0.1.0", path = "../../instruments/blink_fermi_gbm
 blink_gecam = { version = "0.1.0", path = "../../instruments/blink_gecam" }
 blink_grid = { version = "0.1.0", path = "../../instruments/blink_grid" }
 blink_hxmt_he = { version = "0.1.0", path = "../../instruments/blink_hxmt_he" }
+blink_solar = { version = "0.1.0", path = "../../core/blink_solar" }
 blink_search = { version = "0.1.0", path = "../blink_search" }
 blink_svom_grm = { version = "0.1.0", path = "../../instruments/blink_svom_grm" }
 chrono = "0.4.43"

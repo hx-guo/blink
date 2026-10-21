@@ -102,6 +102,7 @@ dependencies = [
  "blink_grid",
  "blink_hxmt_he",
  "blink_search",
+ "blink_solar",
  "blink_svom_grm",
  "blink_wwlln",
  "chrono",
