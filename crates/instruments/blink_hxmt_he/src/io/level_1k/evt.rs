@@ -130,7 +130,7 @@ impl Iterator for Iter<'_> {
 /// 这里走 fitsio-pure 的原生接口 `read_binary_column`，按行取出原始字节。
 fn read_acd(fptr: &fitsio_pure::compat::fitsfile::FitsFile) -> Result<Vec<[bool; 18]>, Error> {
     use fitsio_pure::bintable::{
-        BinaryColumnData, BinaryColumnType, parse_binary_table_columns, read_binary_column,
+        BinaryColumnData, BinaryColumnType, parse_binary_table_columns, read_binary_column_range,
     };
     use fitsio_pure::hdu::HduInfo;
     use fitsio_pure::value::Value;
@@ -148,7 +148,7 @@ fn read_acd(fptr: &fitsio_pure::compat::fitsfile::FitsFile) -> Result<Vec<[bool;
             })
         })
         .ok_or_else(|| Error::InvalidData("no Events HDU".into()))?;
-    let HduInfo::BinaryTable { tfields, .. } = hdu.info else {
+    let HduInfo::BinaryTable { tfields, naxis2, .. } = hdu.info else {
         return Err(Error::InvalidData("Events is not a binary table".into()));
     };
     let columns = parse_binary_table_columns(&hdu.cards, tfields).map_err(native)?;
@@ -163,17 +163,24 @@ fn read_acd(fptr: &fitsio_pure::compat::fitsfile::FitsFile) -> Result<Vec<[bool;
             column.repeat, column.col_type
         )));
     }
-    let BinaryColumnData::Bit(rows) = read_binary_column(fptr.data(), hdu, index).map_err(native)?
-    else {
-        return Err(Error::InvalidData("ACD column did not read as bits".into()));
-    };
-    rows.iter()
-        .map(|row| {
-            <&[u8; 3]>::try_from(row.as_slice())
-                .map(unpack_acd)
-                .map_err(|_| Error::InvalidData(format!("ACD row of {} bytes", row.len())))
-        })
-        .collect()
+    // X 列读出来是每行一个 Vec<u8>，每行 3 字节数据要多背约 50 字节的堆开销；
+    // 一小时上千万行时整列一次读完要多占 1–2 GB，所以分块读、边读边解
+    const CHUNK_ROWS: usize = 1 << 20;
+    let mut acd = Vec::with_capacity(naxis2);
+    for start in (0..naxis2).step_by(CHUNK_ROWS) {
+        let rows = CHUNK_ROWS.min(naxis2 - start);
+        let BinaryColumnData::Bit(chunk) =
+            read_binary_column_range(fptr.data(), hdu, index, start, rows).map_err(native)?
+        else {
+            return Err(Error::InvalidData("ACD column did not read as bits".into()));
+        };
+        for row in &chunk {
+            let bytes = <&[u8; 3]>::try_from(row.as_slice())
+                .map_err(|_| Error::InvalidData(format!("ACD row of {} bytes", row.len())))?;
+            acd.push(unpack_acd(bytes));
+        }
+    }
+    Ok(acd)
 }
 
 fn unpack_acd(row: &[u8; 3]) -> [bool; 18] {
