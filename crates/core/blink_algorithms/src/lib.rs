@@ -1,5 +1,7 @@
+pub mod binomial;
 pub mod constants;
 pub mod detector_share;
+pub mod extended_emission;
 pub mod light_curve;
 pub mod poisson;
 pub mod snapshot_stepping;

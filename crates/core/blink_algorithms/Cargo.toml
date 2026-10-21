@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
 blink_core = { version = "0.1.0", path = "../blink_core" }
 chrono = "0.4.42"
 statrs = "0.18.0"
