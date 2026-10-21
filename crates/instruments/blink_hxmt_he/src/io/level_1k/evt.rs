@@ -53,19 +53,19 @@ impl EventFile {
     }
 
     fn new(filename: &str) -> Result<Self, Error> {
-        let mut fptr = fitsio::FitsFile::open(filename)?;
+        let fptr = fitsio_pure::compat::fitsfile::FitsFile::open(filename)?;
 
         // HDU 1: Events
         let events = fptr.hdu("Events")?;
-        let time = events.read_col::<f64>(&mut fptr, "Time")?;
-        let det_id = events.read_col::<u8>(&mut fptr, "Det_ID")?;
-        let channel = events.read_col::<u8>(&mut fptr, "Channel")?;
-        let pulse_width = events.read_col::<u8>(&mut fptr, "Pulse_Width")?;
+        let time = events.read_col::<f64>(&fptr, "Time")?;
+        let det_id = events.read_col::<u8>(&fptr, "Det_ID")?;
+        let channel = events.read_col::<u8>(&fptr, "Channel")?;
+        let pulse_width = events.read_col::<u8>(&fptr, "Pulse_Width")?;
 
-        let acd = read_acd(&mut fptr)?;
+        let acd = read_acd(&fptr)?;
 
-        let event_type = events.read_col::<u8>(&mut fptr, "Event_Type")?;
-        // let flag = events.read_col::<u8>(&mut fptr, "FLAG")?;
+        let event_type = events.read_col::<u8>(&fptr, "Event_Type")?;
+        // let flag = events.read_col::<u8>(&fptr, "FLAG")?;
 
         Ok(Self {
             time,
@@ -125,53 +125,55 @@ impl Iterator for Iter<'_> {
 
 /// 读 `ACD` 列（FITS `18X`，每行 3 字节，位序高位在前，第 j 位是第 j 块 ACD）。
 ///
-/// 不能用 `read_col`：fitsio 对位列每行只取一个元素，cfitsio 却按字节跨行连续填，
-/// 结果第 i 个事例拿到的是整列第 i 个字节（约第 i/3 行），且只有 8 位。
-fn read_acd(fptr: &mut fitsio::FitsFile) -> Result<Vec<[bool; 18]>, Error> {
-    let hdu = fptr.hdu("Events")?;
-    let fitsio::hdu::HduInfo::TableInfo {
-        column_descriptions,
-        num_rows,
-    } = &hdu.info
-    else {
-        return Err(Error::InvalidData("Events is not a table".into()));
+/// 不能用 `read_col`：位列不是数值列。早先用 cfitsio 的 `read_col::<u32>`，它对位列按字节
+/// 跨行连续填，第 i 个事例拿到的是整列第 i 个字节（约第 i/3 行），标志错配到别的事例上。
+/// 这里走 fitsio-pure 的原生接口 `read_binary_column`，按行取出原始字节。
+fn read_acd(fptr: &fitsio_pure::compat::fitsfile::FitsFile) -> Result<Vec<[bool; 18]>, Error> {
+    use fitsio_pure::bintable::{
+        BinaryColumnData, BinaryColumnType, parse_binary_table_columns, read_binary_column,
     };
-    let (colnum, desc) = column_descriptions
+    use fitsio_pure::hdu::HduInfo;
+    use fitsio_pure::value::Value;
+    let native = |e: fitsio_pure::error::Error| Error::InvalidData(format!("ACD column: {e}"));
+
+    // 与 compat 的 `hdu("Events")` 同一规则：EXTNAME 不分大小写
+    let hdu = fptr
+        .parsed()?
+        .hdus
         .iter()
-        .enumerate()
-        .find(|(_, d)| d.name == "ACD")
+        .find(|hdu| {
+            hdu.cards.iter().any(|card| {
+                card.keyword_str() == "EXTNAME"
+                    && matches!(&card.value, Some(Value::String(s)) if s.trim().eq_ignore_ascii_case("Events"))
+            })
+        })
+        .ok_or_else(|| Error::InvalidData("no Events HDU".into()))?;
+    let HduInfo::BinaryTable { tfields, .. } = hdu.info else {
+        return Err(Error::InvalidData("Events is not a binary table".into()));
+    };
+    let columns = parse_binary_table_columns(&hdu.cards, tfields).map_err(native)?;
+    let index = columns
+        .iter()
+        .position(|c| c.name.as_deref().map(str::trim) == Some("ACD"))
         .ok_or_else(|| Error::InvalidData("no ACD column".into()))?;
-    if desc.data_type.typ != fitsio::tables::ColumnDataType::Bit || desc.data_type.repeat != 18 {
+    let column = &columns[index];
+    if column.col_type != BinaryColumnType::Bit || column.repeat != 18 {
         return Err(Error::InvalidData(format!(
-            "ACD column is not 18X: {:?}",
-            desc.data_type
+            "ACD column is not 18X: {}{:?}",
+            column.repeat, column.col_type
         )));
     }
-    const ROW_BYTES: usize = 3;
-    let mut bytes = vec![0u8; num_rows * ROW_BYTES];
-    if !bytes.is_empty() {
-        let (mut anynul, mut status) = (0, 0);
-        unsafe {
-            fitsio::sys::ffgcvb(
-                fptr.as_raw(),
-                (colnum + 1) as i32,
-                1,
-                1,
-                bytes.len() as i64,
-                0,
-                bytes.as_mut_ptr(),
-                &mut anynul,
-                &mut status,
-            );
-        }
-        fitsio::errors::check_status(status)?;
-    }
-    Ok(bytes
-        .as_chunks::<ROW_BYTES>()
-        .0
-        .iter()
-        .map(unpack_acd)
-        .collect())
+    let BinaryColumnData::Bit(rows) = read_binary_column(fptr.data(), hdu, index).map_err(native)?
+    else {
+        return Err(Error::InvalidData("ACD column did not read as bits".into()));
+    };
+    rows.iter()
+        .map(|row| {
+            <&[u8; 3]>::try_from(row.as_slice())
+                .map(unpack_acd)
+                .map_err(|_| Error::InvalidData(format!("ACD row of {} bytes", row.len())))
+        })
+        .collect()
 }
 
 fn unpack_acd(row: &[u8; 3]) -> [bool; 18] {
@@ -181,7 +183,13 @@ fn unpack_acd(row: &[u8; 3]) -> [bool; 18] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fitsio::tables::{ColumnDataType, ColumnDescription};
+    use fitsio_pure::bintable::{
+        BinaryColumnData, BinaryColumnDescriptor, BinaryColumnType, build_binary_table_cards,
+        serialize_binary_table,
+    };
+    use fitsio_pure::header::{Card, serialize_header};
+    use fitsio_pure::primary::build_primary_header;
+    use fitsio_pure::value::Value;
 
     #[test]
     fn unpack_is_msb_first() {
@@ -190,61 +198,67 @@ mod tests {
         assert_eq!(fired, vec![0, 7, 17]);
     }
 
-    /// 写一个各行 ACD 互不相同的小文件，逐行读回。旧实现在第 2 行起就错位。
+    /// 写一个 1K Evt 结构的小文件（Events 表，ACD 为 18X）
+    fn write_events(path: &std::path::Path, rows: &[[bool; 18]]) {
+        let n = rows.len();
+        let column = |name: &str, col_type: BinaryColumnType, repeat: usize, byte_width: usize| {
+            BinaryColumnDescriptor {
+                name: Some(name.into()),
+                repeat,
+                col_type,
+                byte_width,
+                tdim: None,
+            }
+        };
+        let columns = vec![
+            column("Time", BinaryColumnType::Double, 1, 8),
+            column("Det_ID", BinaryColumnType::Byte, 1, 1),
+            column("Channel", BinaryColumnType::Byte, 1, 1),
+            column("Pulse_Width", BinaryColumnType::Byte, 1, 1),
+            column("ACD", BinaryColumnType::Bit, 18, 3),
+            column("Event_Type", BinaryColumnType::Byte, 1, 1),
+        ];
+        // FITS 位列：每行 ceil(18/8) = 3 字节，第 j 位在第 j/8 字节、自高位起第 j%8 位
+        let bits = rows
+            .iter()
+            .map(|flags| {
+                let mut bytes = vec![0u8; 3];
+                for (j, &on) in flags.iter().enumerate() {
+                    if on {
+                        bytes[j / 8] |= 0x80 >> (j % 8);
+                    }
+                }
+                bytes
+            })
+            .collect();
+        let data = vec![
+            BinaryColumnData::Double((0..n).map(|i| i as f64).collect()),
+            BinaryColumnData::Byte(vec![0; n]),
+            BinaryColumnData::Byte(vec![0; n]),
+            BinaryColumnData::Byte(vec![0; n]),
+            BinaryColumnData::Bit(bits),
+            BinaryColumnData::Byte(vec![0; n]),
+        ];
+        let mut cards = build_binary_table_cards(&columns, n, 0).unwrap();
+        cards.push(Card {
+            keyword: *b"EXTNAME ",
+            value: Some(Value::String("Events".into())),
+            comment: None,
+        });
+        let mut bytes = serialize_header(&build_primary_header(8, &[]).unwrap()).unwrap();
+        bytes.extend(serialize_header(&cards).unwrap());
+        bytes.extend(serialize_binary_table(&columns, &data, n).unwrap());
+        std::fs::write(path, bytes).unwrap();
+    }
+
+    /// 各行 ACD 互不相同的小文件，逐行读回。cfitsio 的 `read_col` 从第 2 行起就错位。
     #[test]
     fn acd_flags_stay_with_their_rows() {
         let path = std::env::temp_dir().join(format!("blink_acd_test_{}.fits", std::process::id()));
-        let _ = std::fs::remove_file(&path);
         let rows: Vec<[bool; 18]> = (0..7)
             .map(|r| std::array::from_fn(|j| (j * 7 + r * 3) % 5 == 0 || j == r))
             .collect();
-        {
-            let mut f = fitsio::FitsFile::create(&path).open().unwrap();
-            let cols: Vec<_> = [
-                ("Time", ColumnDataType::Double, 1),
-                ("Det_ID", ColumnDataType::Byte, 1),
-                ("Channel", ColumnDataType::Byte, 1),
-                ("Pulse_Width", ColumnDataType::Byte, 1),
-                ("ACD", ColumnDataType::Bit, 18),
-                ("Event_Type", ColumnDataType::Byte, 1),
-            ]
-            .into_iter()
-            .map(|(n, t, r)| {
-                ColumnDescription::new(n)
-                    .with_type(t)
-                    .that_repeats(r)
-                    .create()
-                    .unwrap()
-            })
-            .collect();
-            let hdu = f.create_table("Events", &cols).unwrap();
-            let n = rows.len();
-            hdu.write_col(
-                &mut f,
-                "Time",
-                &(0..n).map(|i| i as f64).collect::<Vec<_>>(),
-            )
-            .unwrap();
-            for name in ["Det_ID", "Channel", "Pulse_Width", "Event_Type"] {
-                hdu.write_col(&mut f, name, &vec![0u8; n]).unwrap();
-            }
-            for (r, flags) in rows.iter().enumerate() {
-                let mut larray: Vec<i8> = flags.iter().map(|&b| b as i8).collect();
-                let mut status = 0;
-                unsafe {
-                    fitsio::sys::ffpclx(
-                        f.as_raw(),
-                        5,
-                        r as i64 + 1,
-                        1,
-                        18,
-                        larray.as_mut_ptr(),
-                        &mut status,
-                    );
-                }
-                fitsio::errors::check_status(status).unwrap();
-            }
-        }
+        write_events(&path, &rows);
         let file = EventFile::new(path.to_str().unwrap()).unwrap();
         std::fs::remove_file(&path).unwrap();
         assert_eq!(file.acd, rows);

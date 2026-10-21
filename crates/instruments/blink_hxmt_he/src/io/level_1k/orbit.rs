@@ -33,14 +33,14 @@ impl OrbitFile {
     }
 
     fn new(filename: &str) -> Result<Self, Error> {
-        let mut fptr = fitsio::FitsFile::open(filename)?;
+        let fptr = fitsio_pure::compat::fitsfile::FitsFile::open(filename)?;
 
         // HDU 1: Orbit
         let orbit = fptr.hdu("Orbit")?;
-        let time = orbit.read_col::<f64>(&mut fptr, "Time")?;
-        let lon = orbit.read_col::<f64>(&mut fptr, "Lon")?;
-        let lat = orbit.read_col::<f64>(&mut fptr, "Lat")?;
-        let alt = orbit.read_col::<f64>(&mut fptr, "Alt")?;
+        let time = orbit.read_col::<f64>(&fptr, "Time")?;
+        let lon = orbit.read_col::<f64>(&fptr, "Lon")?;
+        let lat = orbit.read_col::<f64>(&fptr, "Lat")?;
+        let alt = orbit.read_col::<f64>(&fptr, "Alt")?;
 
         Ok(Self {
             time,

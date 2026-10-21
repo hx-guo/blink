@@ -15,11 +15,11 @@ const MIN_MODE_SUPPORT: usize = 10;
 /// 冻结 1963 s，三箱同值），冻结行的 offset 是错的且逐行漂移；首行恰逢
 /// 冻结就会把整小时时间线平移上千秒（Gannon T20 实测 −1042 s）。
 pub fn read_stime_offset(filename: &str) -> Result<f64, Error> {
-    let mut fptr = fitsio::FitsFile::open(filename)?;
+    let fptr = fitsio_pure::compat::fitsfile::FitsFile::open(filename)?;
     let hdu = fptr.hdu("HE_Eng")?;
 
-    let utc: Vec<i64> = hdu.read_col(&mut fptr, "UTC_Last_Bdc")?;
-    let stime: Vec<i64> = hdu.read_col(&mut fptr, "sTime_Last_Bdc")?;
+    let utc: Vec<i64> = hdu.read_col(&fptr, "UTC_Last_Bdc")?;
+    let stime: Vec<i64> = hdu.read_col(&fptr, "sTime_Last_Bdc")?;
 
     if utc.is_empty() || stime.is_empty() {
         return Err(Error::InvalidData("Empty eng data".into()));

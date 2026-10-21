@@ -28,17 +28,17 @@ pub struct PosAttFile {
 }
 
 impl PosAttFile {
-    pub fn from_fits_file(path: &str) -> Result<Self, fitsio::errors::Error> {
-        let mut fptr = fitsio::FitsFile::open(path)?;
+    pub fn from_fits_file(path: &str) -> Result<Self, fitsio_pure::compat::errors::Error> {
+        let fptr = fitsio_pure::compat::fitsfile::FitsFile::open(path)?;
         let hdu = fptr.hdu("ORBIT_ATTITUDE")?;
         Ok(Self {
-            time: hdu.read_col::<f64>(&mut fptr, "TIME")?,
-            q1: hdu.read_col::<f32>(&mut fptr, "Q1")?,
-            q2: hdu.read_col::<f32>(&mut fptr, "Q2")?,
-            q3: hdu.read_col::<f32>(&mut fptr, "Q3")?,
-            latitude: hdu.read_col::<f32>(&mut fptr, "Latitude")?,
-            longitude: hdu.read_col::<f32>(&mut fptr, "Longitude")?,
-            altitude_m: hdu.read_col::<f32>(&mut fptr, "Altitude")?,
+            time: hdu.read_col::<f64>(&fptr, "TIME")?,
+            q1: hdu.read_col::<f32>(&fptr, "Q1")?,
+            q2: hdu.read_col::<f32>(&fptr, "Q2")?,
+            q3: hdu.read_col::<f32>(&fptr, "Q3")?,
+            latitude: hdu.read_col::<f32>(&fptr, "Latitude")?,
+            longitude: hdu.read_col::<f32>(&fptr, "Longitude")?,
+            altitude_m: hdu.read_col::<f32>(&fptr, "Altitude")?,
         })
     }
 
