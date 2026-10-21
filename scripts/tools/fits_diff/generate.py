@@ -234,6 +234,15 @@ simple('grid_posatt', 'ORBIT_ATTITUDE', [('TIME', 'time'), ('Q1', 'f32'), ('Q2',
        ('Latitude', 'f32'), ('Longitude', 'f32'), ('Altitude', 'f32')])
 
 # --- error paths: missing HDU or column -------------------------------------------------------------
+def gecam_evt_broken(kind):
+    """GECAM-B events where EVENTS05 lacks PI, or is missing altogether: both must fail the file."""
+    hdus = gecam_evt(25)(50, 'native', False, str)
+    bad = [h for h in hdus if h.name != 'EVENTS05']
+    t = next(h for h in hdus if h.name == 'EVENTS05')
+    no_pi = fits.BinTableHDU.from_columns([c for c in t.columns if c.name != 'PI'], name='EVENTS05')
+    write(kind, f'err__{kind}_no_pi_in_05', [h if h.name != 'EVENTS05' else no_pi for h in hdus])
+    write(kind, f'err__{kind}_no_05', bad)
+gecam_evt_broken('gecam_evt')
 write('hxmt_evt', 'err__no_events_hdu', [table('Other', [('Time', 'time')], 3, 'native')])
 write('hxmt_orbit', 'err__no_lon_column', [table('Orbit', [('Time', 'time'), ('Lat', 'f64'), ('Alt', 'f64')], 3, 'native')])
 write('gbm_tte', 'err__no_gti', [table('EVENTS', [('TIME', 'time'), ('PHA', 'i16')], 3, 'native')])
