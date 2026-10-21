@@ -112,6 +112,30 @@ pub enum TopCommands {
         #[arg(long, default_value = "csi")]
         scint: String,
     },
+    /// Naming: match a pipeline catalog (`catalog --out-dir`) against the name registry,
+    /// assign yymmddAA names to new final events, record changes, retract or merge.
+    /// Dry run unless --apply.
+    Name {
+        /// Catalog directory written by `blink catalog --out-dir`
+        catalog: PathBuf,
+        /// Registry directory (names.csv, detections.csv, history.csv, public_instruments.txt)
+        #[arg(long)]
+        registry: PathBuf,
+        /// Catalog version label recorded in the registry (e.g. Insight-HXMT_HE/v10)
+        #[arg(long)]
+        version: String,
+        /// Write the registry; without it only the report is printed
+        #[arg(long, conflicts_with = "apply_new_only")]
+        apply: bool,
+        /// Write only what keeps published names as they are (matches, new names, detections of
+        /// other instruments); retractions, merges and reinstatements are held for review and
+        /// make the command exit with status 3
+        #[arg(long)]
+        apply_new_only: bool,
+        /// Allow --apply from a build with uncommitted changes (its version is not reproducible)
+        #[arg(long)]
+        allow_dirty: bool,
+    },
     /// Catalog stage. Two modes:
     /// `-o CSV`: paper catalog from tgfs.json of `blink wwlln` (train removal, then
     /// fa <= 1e-5, or fa <= 1 with lightning association).

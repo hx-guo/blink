@@ -6,6 +6,7 @@ pub mod detect;
 pub mod dump;
 pub mod extract;
 pub mod inject;
+pub mod name;
 pub mod reconstruct;
 pub mod report;
 pub mod vet;

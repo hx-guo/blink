@@ -261,6 +261,32 @@ fn main() {
                 commands::vet::cmd_vet_days(from, to, workers, worker, max_fa, force);
             }
         }
+        TopCommands::Name {
+            catalog,
+            registry,
+            version,
+            apply,
+            apply_new_only,
+            allow_dirty,
+        } => {
+            let writes = apply || apply_new_only;
+            // 编号永久记下分配它的代码版本；带未提交改动的构建无法复现
+            let build = env!("BLINK_GIT");
+            assert!(
+                !writes || allow_dirty || !(build.ends_with("-dirty") || build == "unknown"),
+                "name --apply from build {build}: commit first, or pass --allow-dirty"
+            );
+            use commands::name::Apply;
+            let mode = match (apply, apply_new_only) {
+                (true, _) => Apply::All,
+                (_, true) => Apply::NewOnly,
+                _ => Apply::DryRun,
+            };
+            if commands::name::cmd_name(&catalog, &registry, &version, mode) {
+                // 有撤销/合并/恢复待人工确认：调度脚本据此报警
+                std::process::exit(3);
+            }
+        }
         TopCommands::Catalog {
             input,
             out,
