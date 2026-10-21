@@ -5,6 +5,7 @@ use indicatif::{MultiProgress, ProgressBar};
 use std::collections::BTreeMap;
 use std::fs;
 
+pub mod exposure;
 mod report;
 
 pub use report::{DayReport, HourRecord, HourStatus};
@@ -82,6 +83,9 @@ pub fn search_day<I: Instrument>(day: NaiveDate, multi_progress: &MultiProgress)
 
     let mut all_signals = Vec::new();
     let mut hours: Vec<HourRecord> = Vec::with_capacity(24);
+    // 曝光与搜索用同一个 chunk，口径一致、不必再载一遍数据（S5，见 exposure.rs）
+    let mut exposure_grid = exposure::Grid::default();
+    let mut exposure_implemented = false;
     for hour in 0..24 {
         let naive = day.and_hms_opt(hour, 0, 0).expect("invalid time");
         let record = match I::Chunk::from_epoch(&Utc.from_utc_datetime(&naive)) {
@@ -109,6 +113,10 @@ pub fn search_day<I: Instrument>(day: NaiveDate, multi_progress: &MultiProgress)
                             .collect::<Vec<_>>();
                         let n_signals = signals.len();
                         all_signals.append(&mut signals);
+                        if let Some(samples) = exposure::hour_samples(&chunk) {
+                            exposure_grid.add::<I>(&samples);
+                            exposure_implemented = true;
+                        }
                         HourRecord::searched(hour, chunk.coverage(), n_signals)
                             .with_metrics(metrics(&chunk))
                     }
@@ -144,6 +152,12 @@ pub fn search_day<I: Instrument>(day: NaiveDate, multi_progress: &MultiProgress)
     let report = DayReport::new(day, I::name(), hours);
     let json = serde_json::to_string_pretty(&report).expect("failed to serialize hour report");
     write_atomic(&report_file, &json);
+
+    if exposure_implemented {
+        spin_bar_writting.set_message("writing exposure");
+        let path = exposure::day_path::<I>(std::path::Path::new("data"), day, "exposure");
+        exposure::write_day(&path, &exposure_grid.into_day(day, I::name()));
+    }
 
     // 老版本的自由文本 errors.txt 已被逐小时账本取代；留着只会跟账本打架。
     let _ = fs::remove_file(format!(

@@ -1,6 +1,7 @@
 pub mod attitude;
 pub mod coverage;
 pub mod ebounds;
+pub mod exposure;
 pub mod mission_elapsed_time;
 pub mod position;
 pub mod signal;
@@ -10,6 +11,7 @@ pub mod trajectory;
 pub use attitude::Attitude;
 pub use coverage::{Coverage, ExclusionReason};
 pub use ebounds::Ebounds;
+pub use exposure::ExposureSample;
 pub use mission_elapsed_time::MissionElapsedTime;
 pub use position::Position;
 pub use signal::{AcdCounts, DetectorCounts, Signal, UnifiedSignal};

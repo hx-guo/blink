@@ -34,6 +34,27 @@ pub enum TopCommands {
         #[arg(long, value_enum, default_value_t = Instrument::HxmtHe)]
         instrument: Instrument,
     },
+    /// Exposure (pipeline S5): live time of the search along the orbit, per day
+    /// (YYYYMMDD_exposure.json). `blink search` writes it too; this fills it in for days
+    /// searched before, without searching again.
+    Exposure {
+        /// Start date (YYYY-MM-DD)
+        from: String,
+        /// End date (YYYY-MM-DD)
+        to: String,
+        /// Rewrite exposure files even if newer than the data
+        #[arg(long)]
+        force: bool,
+        /// Total number of parallel workers (days are sharded round-robin)
+        #[arg(long, default_value_t = 1)]
+        workers: usize,
+        /// This worker's index in [0, workers)
+        #[arg(long, default_value_t = 0)]
+        worker: usize,
+        /// Instrument
+        #[arg(long, value_enum, default_value_t = Instrument::HxmtHe)]
+        instrument: Instrument,
+    },
     /// Vet candidates (GRB extended-emission rule, ACD electron-beam test, light curves).
     /// Day mode reads YYYYMMDD_signals.json and writes YYYYMMDD_vet.json next to it;
     /// list mode appends the verdict columns to any CSV with start/stop columns.

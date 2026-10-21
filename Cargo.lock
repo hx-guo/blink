@@ -210,12 +210,14 @@ name = "blink_search"
 version = "0.1.0"
 dependencies = [
  "blink_core",
+ "blink_solar",
  "blink_workflow",
  "chrono",
  "indicatif",
  "nanoid",
  "serde",
  "serde_json",
+ "uom",
 ]
 
 [[package]]

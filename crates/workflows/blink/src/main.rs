@@ -205,6 +205,34 @@ fn main() {
         TopCommands::AcdAudit { list, out, scint } => {
             commands::acd_audit::cmd_acd_audit(&list, &out, &scint);
         }
+        TopCommands::Exposure {
+            from,
+            to,
+            force,
+            workers,
+            worker,
+            instrument,
+        } => {
+            let parse = |s: &str| {
+                chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d")
+                    .unwrap_or_else(|e| panic!("invalid date '{s}': {e}"))
+            };
+            let (from, to) = (parse(&from), parse(&to));
+            assert!(workers >= 1 && worker < workers, "--worker out of range");
+            use blink_search::exposure::exposure_range as run;
+            match instrument {
+                Instrument::HxmtHe => run::<blink_hxmt_he::types::HxmtHe>(from, to, workers, worker, force),
+                Instrument::SvomGrm => run::<blink_svom_grm::types::SvomGrm>(from, to, workers, worker, force),
+                Instrument::FermiGbm => run::<blink_fermi_gbm::types::FermiGbm>(from, to, workers, worker, force),
+                Instrument::Grid02 => run::<blink_grid::types::Grid02>(from, to, workers, worker, force),
+                Instrument::Grid03b => run::<blink_grid::types::Grid03B>(from, to, workers, worker, force),
+                Instrument::Grid04 => run::<blink_grid::types::Grid04>(from, to, workers, worker, force),
+                Instrument::Grid07 => run::<blink_grid::types::Grid07>(from, to, workers, worker, force),
+                Instrument::GecamA => run::<blink_gecam::types::GecamA>(from, to, workers, worker, force),
+                Instrument::GecamB => run::<blink_gecam::types::GecamB>(from, to, workers, worker, force),
+                Instrument::GecamC => run::<blink_gecam::types::GecamC>(from, to, workers, worker, force),
+            }
+        }
         TopCommands::Vet {
             from,
             to,

@@ -9,6 +9,7 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 mod check_saturation;
+mod exposure;
 mod from_epoch;
 mod search;
 
@@ -95,6 +96,11 @@ impl blink_core::traits::Chunk for Chunk {
             span_seconds: stop - start,
             masked_seconds,
         }
+    }
+
+    /// 活时间 = 机箱 GTI 交集减饱和窗，与搜索同一口径（见 `chunk/exposure.rs`）
+    fn exposure_samples(&self, step_seconds: f64) -> Option<Vec<blink_core::types::ExposureSample>> {
+        Some(self.exposure_samples_impl(step_seconds))
     }
 
     /// 在 `search` 之后取：`dropped_no_ephemeris` 是搜索过程中才产生的。
