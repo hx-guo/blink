@@ -29,7 +29,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
 from scipy.interpolate import RegularGridInterpolator
 
-sys.path.insert(0, "scripts")
+import sys as _sys; from pathlib import Path as _Path; _sys.path[:0] = [str(_Path(__file__).resolve().parent / _d) for _d in (".", "../../lib",)]  # sibling and shared script modules
 from unwrap_large_v2 import unwrap_large_v2, CONF_LOW
 
 CACHE = Path("n_below_study/clean_relaxed_2020_sample05.parquet")

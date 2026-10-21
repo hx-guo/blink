@@ -65,7 +65,7 @@ struct PacketTimeSummary {
 /// 下游的后果不受影响，仍然成立：深饱和段的包络是真通量的下界（逐箱占空比
 /// 约 1/3），该段候选的显著性也不可靠（本底被死时间稀释）。对 TGF 计数无影响
 /// ——风暴日在目录阶段就被 train 判据摘除了；但 REP episode 的定量必须回 1B 做
-/// 占空比改正。诊断图见 `scripts/plot_gannon_fifo_chopping.py`。
+/// 占空比改正。诊断图见 `scripts/saturation/plot_gannon_fifo_chopping.py`。
 const GAP_FACTOR: f64 = 100.0;
 
 /// 泊松指数下限：`λ_stable × gap` 要超过它才算 FIFO 复位。

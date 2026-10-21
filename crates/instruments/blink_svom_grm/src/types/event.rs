@@ -52,7 +52,7 @@ impl blink_core::traits::Event for Event {
         // ch15→ch25 少 15% 的 TGF 计数、少 43% 的本底，信噪中位 12.4→13.9，达到
         // p≤1e-8 的比例 85%→93%；ch25–30 是平台，ch40 以上信号计数掉得快。早先的
         // ch15 是经验值（HXMT 用 ch38，GRM 的 ch38 已是 78 keV 切得过狠；实测 PI≥50
-        // 候选数不降反升）。见 scripts/plot_svom_threshold.py。
+        // 候选数不降反升）。见 scripts/svom/plot_svom_threshold.py。
         const CHANNEL_THRESHOLD: i16 = 25;
         // EBOUNDS 顶端两道（257/258）是 10–20 MeV 溢出道。
         const OVERFLOW_CHANNEL: i16 = 256;

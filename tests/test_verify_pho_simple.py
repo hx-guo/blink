@@ -1,4 +1,4 @@
-"""Tests for scripts/verify_pho_simple.py."""
+"""Tests for scripts/saturation/verify_pho_simple.py."""
 from __future__ import annotations
 
 import numpy as np

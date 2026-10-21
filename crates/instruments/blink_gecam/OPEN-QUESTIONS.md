@@ -99,7 +99,7 @@ GECAM-A 某小时 1303 s / 3600 s（1 段）。曝光按 GTI 算，事例流也�
 低于本底、从 42 keV 起才反超，切在那里少 15% 信号、少 43% 本底，信噪反升。
 GECAM 是 LaBr₃、能量梯一路到 10 MeV，谱学响应不同，这条结论不能直接搬。
 **要做的**：等 GECAM 攒出闪电证实样本后按同样办法重扫，脚本可照
-`scripts/plot_svom_threshold.py` 改。
+`scripts/svom/plot_svom_threshold.py` 改。
 
 ### 2. CPD 判据未定标
 

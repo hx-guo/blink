@@ -1,4 +1,4 @@
-"""Tests for scripts/extract_per_sec_day.py."""
+"""Tests for scripts/saturation/extract_per_sec_day.py."""
 from __future__ import annotations
 
 import math

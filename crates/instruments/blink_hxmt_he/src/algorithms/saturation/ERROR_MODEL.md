@@ -286,7 +286,7 @@ $\approx|r_{\rm post}-r_{\rm pre}|/(r_{\rm pre}+r_{\rm post})$（下界启发式
 误差枚举再全也要闭环验证。全部**确定性**（无 MC，§10）：
 1. **掩掉-重建注入**（主）：取未饱和已知亮暴，**确定性**掩掉 target 盒，重建后逐 bin 比真值（时域）。
    **三条腿全部真值验证**，实测 250919A 平坦 baseline（各 138 gap），可从仓库复现
-   （`scripts/injection_validation.sh [--cosat|--degenerate]`）：
+   （`scripts/saturation/injection_validation.sh [--cosat|--degenerate]`）：
    - **cross-ref measured 腿**：pull.std=1.06、bias −0.27%。
    - **共饱和 empty 腿**（`--cosat`：参考盒 gap 中段也标 unreliable → 真机制 empty）：1.01、bias −0.00%。
    - **degenerate 退化腿**（`--degenerate`：全宽共饱和 → 无参考 → 端点率 ramp 外推、r 项秩-2 σ）：

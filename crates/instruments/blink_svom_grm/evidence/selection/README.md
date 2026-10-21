@@ -5,7 +5,7 @@
 - `selection_bins.csv`：两台仪器的候选按 fa 分 120 箱，逐箱的候选数、闪电关联数、误关联期望，
   以及各自覆盖内的曝光秒数。只统计 WWLLN 覆盖内、且已按池级规则去掉列车成员的候选。
   生成：`scripts/cluster/selection_bins.py`（在集群上读两份 tgfs.json）。
-- `selection_comparison.png`：`scripts/plot_selection_comparison.py` 画的三面板图。
+- `selection_comparison.png`：`scripts/svom/plot_selection_comparison.py` 画的三面板图。
 
 数据（覆盖内、去列车后）：
 

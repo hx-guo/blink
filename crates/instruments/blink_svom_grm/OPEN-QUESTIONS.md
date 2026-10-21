@@ -329,7 +329,7 @@ v5 重跑（`svomrun5`，整窗口径，多含 2026-09-06 一天）：候选 253
 
 ### 14. 能阈从 ch15 改为 ch25（42 keV），用证实样本定的（2026-09-07）
 
-`scripts/cluster/svom_spectra.py` + `scripts/plot_svom_threshold.py`：GRM 硬件下限 ch10（15 keV），
+`scripts/cluster/svom_spectra.py` + `scripts/svom/plot_svom_threshold.py`：GRM 硬件下限 ch10（15 keV），
 本底谱在 ch11–19 有鼓包（每道计数为 ch23 以后的 2–3 倍），低道事例不成簇（≥5 个/ms 格子里的
 占比 0.7%，比高道还低），是平稳的软本底。72 个闪电证实 TGF 的窗内谱比本底硬得多：窗内/本底
 比值 ch10–14 0.19、ch15–19 0.33、ch20–29 0.61、ch30–49 1.15、ch50+ 2.0。能阈扫描（证实样本，
@@ -352,7 +352,7 @@ S 与 B 都只算阈上事例）：
 
 ### 15. 候选数随虚警率的分布（power-law 图），覆盖内时段（2026-09-07）
 
-`scripts/plot_svom_powerlaw.py`，与 HXMT 论文同一套画法，用 v6 在 WWLLN 覆盖内（2024-06-22 →
+`scripts/svom/plot_svom_powerlaw.py`，与 HXMT 论文同一套画法，用 v6 在 WWLLN 覆盖内（2024-06-22 →
 2024-12-31，193 天）的 5797 个候选、151 个关联：
 
 - 本底段（fa > 1e-3）幂律指数 0.81；TGF 段（fa < 1e-8）指数 0.039；关联候选（fa < 1e-2）指数
@@ -369,7 +369,7 @@ S 与 B 都只算阈上事例）：
 
 **决定：SVOM 的目录判选与 HXMT 完全相同——池级去列车 → fa ≤ 1e-5 直接接受 ∪ (fa ≤ 1 且闪电
 关联)。** 依据是两台仪器的候选分布与分段关联率形状一致（图 `evidence/selection/`，脚本
-`scripts/plot_selection_comparison.py` + `scripts/cluster/selection_bins.py`）。
+`scripts/svom/plot_selection_comparison.py` + `scripts/cluster/selection_bins.py`）。
 
 `blink catalog tgfs.json -o catalog_svom_v6.csv`（svomrun6）：池 25754 → 去列车 65 → 25689；
 选出 947 = 直接（fa ≤ 1e-5）895 + 仅关联（fa ≤ 1 且关联）52；误救期望 0.8。判选规则与 HXMT
@@ -387,7 +387,7 @@ S 与 B 都只算阈上事例）：
 
 WWLLN 止于 2024-12-31，只覆盖观测期的头 193 天（曝光 140.2 天，覆盖外 469.0 天），目录里 78%
 的候选无法用闪电验证。检验它们是否同一人群，就能把覆盖内的关联率外推到整个目录。
-脚本 `scripts/plot_svom_coverage.py`，图与输入表留档在 `evidence/coverage/`。
+脚本 `scripts/svom/plot_svom_coverage.py`，图与输入表留档在 `evidence/coverage/`。
 
 **单变量**（KS + Anderson-Darling，地方时是圆周量用 Kuiper 置换检验；每族 8 个检验做 Holm 校正）：
 
@@ -436,7 +436,7 @@ WWLLN 止于 2024-12-31，只覆盖观测期的头 193 天（曝光 140.2 天，
 ### 18. 82 个闪电证实 TGF 的科学表征（2026-09-07）
 
 样本 = v6 里 fa ≤ 1e-5、覆盖内、闪电关联的 82 个（偶然关联期望合计 0.32）。事例级数据由
-`scripts/cluster/svom_tgf_sample.py` 导出，分析与图见 `scripts/plot_svom_tgf_sample.py`，
+`scripts/cluster/svom_tgf_sample.py` 导出，分析与图见 `scripts/svom/plot_svom_tgf_sample.py`，
 图与逐个 TGF 的表留档在 `evidence/sample/`。
 
 **时长**：对 ±5 ms 内的到达时间做非分箱扩展极大似然拟合（已知本底率 + 高斯脉冲），
@@ -728,7 +728,7 @@ q = 2⁻²⁰ s = 0.954 µs，卷进同格对的事例占比期望 ≈ (n−1)·
 （ch240–244 是 ch200–204 的 8 倍）、到 ch250 断崖归零，是可用 ADC 量程顶端的假象；
 不切掉的话最高一格实测/模型 = 7.0，会把拟合整个带偏。
 
-**结果**（图与数据 `evidence/spectrum/`，脚本 `scripts/plot_svom_photon_spectrum.py`）：
+**结果**（图与数据 `evidence/spectrum/`，脚本 `scripts/svom/plot_svom_photon_spectrum.py`）：
 
 | 样本 | N | 叠加计数 | 幂律指数 α（dN/dE ∝ E^−α） |
 |---|---|---|---|
@@ -808,7 +808,7 @@ q = 2⁻²⁰ s = 0.954 µs，卷进同格对的事例占比期望 ≈ (n−1)·
 ζ 中位 27.9°（3.5–57.0），sec ζ 中位 1.13（1.00–1.83）。三者两两相关都不大
 （θ–secζ +0.204、θ–f −0.174、secζ–f −0.354），所以分得开。
 
-**做法是一次全局拟合**（`scripts/plot_svom_photon_systematics.py`，证据
+**做法是一次全局拟合**（`scripts/svom/plot_svom_photon_systematics.py`，证据
 `evidence/systematics/`）：逐 TGF 的谱指数写成 α_i = α0 + Σ β_k (x_ik − x̄_k)，
 注量归一 A_i 仍逐 TGF 剖面掉，统计量仍是 Cash。这样三支互相控制、83 个样本
 全用上，而不是切成每格 20 个的格子。
@@ -839,7 +839,7 @@ TGF 传播的蒙卡结果同向），但在本样本里只有 2.2σ、跨度上 
 * 不是某一路 GRD 标定偏了——那会表现为 φ 依赖。主导探头分组给 0.974 / 0.743 / 0.880，
   φ 四象限给 0.99 / 0.96 / 0.75 / 0.82，散布都远小于 θ 的 0.68，而且与 θ 本身的
   相关足以解释。
-* 不是探测选择效应，**符号反了**。实测 CALDB 的有效面积（`scripts/diag_svom_effective_area.py`，
+* 不是探测选择效应，**符号反了**。实测 CALDB 的有效面积（`scripts/svom/diag_svom_effective_area.py`，
   证据 `evidence/systematics/effective_area.txt`）：θ≥90° 对 θ<90° 的面积比随能量
   从 42–80 keV 的 **0.124** 单调升到 5–8 MeV 的 0.870。大 θ 处低能被星体挡掉八成，
   所以选择效应**偏向在大 θ 一端探到硬谱的暴发**，而实测那一端更软。
@@ -892,7 +892,7 @@ HXMT 那边发现按**物理分组**聚合的占比判别力远高于单路读�
 单路 0.58）。SVOM/GRM 只有 3 个 GRD，读出粒度与分组粒度本来就是一回事，所以
 在 SVOM 上只有一个层级可算。**这条经验在 SVOM 上不成立，记下来免得后人再试。**
 
-**判别力：零。**（`scripts/diag_svom_detector_share.py`，v6 的 899 个显著候选，
+**判别力：零。**（`scripts/svom/diag_svom_detector_share.py`，v6 的 899 个显著候选，
 证据 `evidence/detshare/detector_share_auc.txt`）
 
 | 量 | AUC（闪电证实 82 vs 覆盖内未证实 121） |
@@ -913,7 +913,7 @@ HXMT 那边发现按**物理分组**聚合的占比判别力远高于单路读�
 **份额为什么是平的：CALDB 预测的各向异性在数据里找不到。** 拿 83 个闪电证实的
 干净核心窗（t0 ± 2σ，本底占 3.3%）跟 CALDB 在各自真实入射方向上的预测比，
 拟合 q_d = (1−ε)/3 + ε·p_d（ε=1 预测成立，ε=0 等照射）。
-`scripts/diag_svom_share_vs_response.py`，证据 `evidence/detshare/share_vs_response.txt`。
+`scripts/svom/diag_svom_share_vs_response.py`，证据 `evidence/detshare/share_vs_response.txt`。
 
 **先要拆掉一个自造的伪信号。** 预测里若直接乘 live_d = 1 − f_d，而 f_d 是从**该探头
 自己的事例**算出来的（Σ DEAD_TIME / 窗长），那么某一路泊松涨高时 f_d 也高、
@@ -932,7 +932,7 @@ HXMT 那边发现按**物理分组**聚合的占比判别力远高于单路读�
 
 **方向链不是原因，已独立核过。** orb 表同时给 `X_J2000` 与 `X_WGS84`
 （任务方自己算的两套坐标），拿它当真值核 `svom_wwlln_match.py` 里的地固→惯性
-这一步（`scripts/diag_svom_orb_frames.py`，证据 `evidence/detshare/orb_frame_check.txt`）：
+这一步（`scripts/svom/diag_svom_orb_frames.py`，证据 `evidence/detshare/orb_frame_check.txt`）：
 astropy 的 ITRS→GCRS 与 orb 自带的 J2000 差**中位 0.006°、最大 0.024°**；
 LON/LAT/ALT 按 WGS84 椭球反算与 X_WGS84 差 0.0000°（脚本里用的球面近似差 0.12°，
 无关紧要）。对照：经度取反会差 76°，把 TT 当 UTC 会差 0.27°。**都不是。**
@@ -953,7 +953,7 @@ LON/LAT/ALT 按 WGS84 椭球反算与 X_WGS84 差 0.0000°（脚本里用的球�
 
 **方位扫描也做了，整条平。** 在 φ + Δφ（Δφ = 0…330°，步长 30°）与 θ → 180−θ 上
 用 CALDB 重算三路有效面积（`scripts/cluster/svom_resp_scan.py` + 
-`scripts/diag_svom_resp_azimuth.py`，证据 `evidence/detshare/azimuth_scan.txt`），
+`scripts/svom/diag_svom_resp_azimuth.py`，证据 `evidence/detshare/azimuth_scan.txt`），
 13 个变体的 ε 全在 −0.28 … +0.25 之间，**没有一个把 ε 拉到 1**；13 个变体的
 对数似然只差 2.6（−1553.4 … −1550.8），即似然面对 Δφ 完全是平的。
 **所以不是方位错位。** 加上 orb 双坐标那条 0.02° 的核验，方向链这条路排干净了。
@@ -1030,7 +1030,7 @@ LON/LAT/ALT 按 WGS84 椭球反算与 X_WGS84 差 0.0000°（脚本里用的球�
 
 雷暴有强日变化，本底没有。把一批候选的**当地太阳时**（LST = UTC + 经度/15 +
 时差方程）直方图拆成「雷暴模板 + 平坦本底」两成分拟合，**不需要任何一个候选被
-台网探到**。脚本 `scripts/diag_svom_local_time.py`、`diag_svom_lst_land_ocean.py`、
+台网探到**。脚本 `scripts/svom/diag_svom_local_time.py`、`diag_svom_lst_land_ocean.py`、
 `diag_svom_lst_exposure_control.py`，模板由 `scripts/cluster/svom_wwlln_lst_template.py`
 生成，证据 `evidence/localtime/`。
 
@@ -1108,7 +1108,7 @@ A = (max − min)/2/均值（8 格归一化）下**陆地模板 GBM 0.988、HXMT
 **下垫面是每个候选自己的星下点决定的已知协变量，不是待拟参数**（GBM 实测把它当
 自由参数拟，误差带反而更宽）。所以逐候选按 GBM 的口径分三类（星下点在陆上算陆地；
 在海上离陆 < 300 km 算近岸，否则远洋），每类配同类模板、每类只留一个自由参数
-（`scripts/diag_svom_lst_by_surface.py`，证据 `evidence/localtime/by_surface.txt`）：
+（`scripts/svom/diag_svom_lst_by_surface.py`，证据 `evidence/localtime/by_surface.txt`）：
 
 | 显著池 fa ≤ 1e-5 | N | f_TGF | 68% 区间 | ΔlnL(f=0) |
 |---|---|---|---|---|
@@ -1148,7 +1148,7 @@ GBM 的 TGF 日变化。覆盖外的陆地候选给 0.90 [0.79, 1.00]，与覆�
 第 32b 条把近岸/远洋两类记成「模板搬不过来」，依据是纯本底档（fa 0.1–1）的远洋
 拟出 f = −0.23，68% 区间 [−0.34, −0.11] 不含 0。**这个判断撤回。** 做了三组只变
 一个量的对照加一条零假设分布之后，三种候选解释——模板形状、本底模型、样本本身——
-一条都立不住，卡住的是灵敏度。脚本 `scripts/diag_svom_lst_template_crosscheck.py`，
+一条都立不住，卡住的是灵敏度。脚本 `scripts/svom/diag_svom_lst_template_crosscheck.py`，
 证据 `evidence/localtime/template_crosscheck.txt`。
 
 **先撤回那个「显著负值」。** 判显著用的是似然区间，而似然区间比 f 的真实散布窄。
@@ -1233,7 +1233,7 @@ GBM 组独立量到同一件事，而且是在已认证真 TGF 上量的：拿�
 它继承的是两类不灵敏的模板，不是坏掉的模板，而且误差棒已经如实反映了这一点。**
 
 **「三类的 f 应当相等」这个自洽检验作废。** 第 32b 条和
-`scripts/diag_svom_lst_by_surface.py` 的注释里都写着「纯度不该依赖候选落在哪儿」，
+`scripts/svom/diag_svom_lst_by_surface.py` 的注释里都写着「纯度不该依赖候选落在哪儿」，
 这是错的：**纯度 = 该类里 TGF 率 /（TGF 率 + 本底率），而 TGF 的产生密度随下垫面
 变化、本底不跟着同一张地图变**，所以 f 本来就应当在海上更低。实测陆地 0.84 ± 0.12
 对海上合计 0.31 ± 0.19，**差 0.53 ± 0.23（2.4σ），方向正是预期的那一边**。
@@ -1285,7 +1285,7 @@ CALDB 背/正有效面积比从 42–80 keV 的 0.124 单调升到 5–8 MeV 的
 这两条如果是同一件事，只能是一个机理：**CALDB 低估了背面入射的低能响应**。
 它有两个可测的预言，两个都测了，**两个都对**；但把它写成「背面低能有效面积
 乘一个系数」这种最简单的形式，**定量上被证伪**。
-脚本 `scripts/diag_svom_theta_mechanism.py`，证据 `evidence/systematics/theta_mechanism.txt`。
+脚本 `scripts/svom/diag_svom_theta_mechanism.py`，证据 `evidence/systematics/theta_mechanism.txt`。
 
 **预言一：θ 项应当住在低能端。** 把低能道逐段从拟合里去掉，β_θ 塌下去；
 从高能端切**同样多的道**作对照，β_θ 不塌反涨：
@@ -1380,7 +1380,7 @@ GBM 组提出的估计量：一批候选的**下垫面构成**必然落在「纯
 「纯本底的构成」之间，位置由混合比例定。它只用每个候选星下点落在哪一类，
 **不碰 LST、不碰模板、不碰台网**，所以**不需要模板有分辨力**——正好绕开第 32c 条
 那堵墙（A ≈ 0.3 的模板在这个 N 上测不出 f）。脚本
-`scripts/diag_svom_surface_composition.py`，证据 `evidence/localtime/surface_composition.txt`。
+`scripts/svom/diag_svom_surface_composition.py`，证据 `evidence/localtime/surface_composition.txt`。
 
 **构成随虚警率的阶梯**（单点口径：星下点判陆，海上离陆 < 300 km 算近岸）：
 
@@ -1467,7 +1467,7 @@ TGF 构成两个自由参数，各虚警率档的 f 各自自由，多项式联�
 
 **两条腿互相检验，结果不自洽（2026-09-11）。** LST 腿逐类给 f，由它可以**反推**
 显著池里本底成分的下垫面构成 `N_c × (1 − f_c)`；构成腿则**假定**这个构成等于低显著档
-（fa 5–20）的本底构成。两者必须对得上（脚本 `scripts/diag_svom_cross_leg.py`）：
+（fa 5–20）的本底构成。两者必须对得上（脚本 `scripts/svom/diag_svom_cross_leg.py`）：
 
 | | 陆地 | 近岸 | 远洋 | χ²/2 |
 |---|---|---|---|---|

@@ -83,7 +83,7 @@ def load_aacgm():
 
 
 def main():
-    # v5t_calib.npz is locally produced by our own scripts/v5t_fixed_formula_verify.py
+    # v5t_calib.npz is locally produced by our own scripts/saturation/v5t_fixed_formula_verify.py
     # and only contains numpy arrays + scalars we actually use (s0_det, beta, w,
     # k_coeffs, C0). t0 in the npz is unused — we hardcode it. No pickle needed.
     with np.load("n_below_study/v5_npz/v5t_calib.npz") as z:

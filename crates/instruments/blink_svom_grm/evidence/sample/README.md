@@ -13,7 +13,7 @@ v6 目录里 fa ≤ 1e-5、落在 WWLLN 覆盖内、且关联到闪电的 **82 �
 ## 怎么算的
 
 事例来自 L1B（集群 `scripts/cluster/svom_tgf_sample.py` 导出每个 TGF 中心 ±50 ms 的逐事例，
-以及 ±1 s 的本底谱），离线分析与画图是 `scripts/plot_svom_tgf_sample.py`。
+以及 ±1 s 的本底谱），离线分析与画图是 `scripts/svom/plot_svom_tgf_sample.py`。
 
 - **事例准入**：`EVT_TYPE==0`、`25 ≤ PI < 256`（v6 能阈 ch25 ≈ 42 keV）、`ANTI_COIN==0`。
   ANTI_COIN==1 是星上标定源（49–57 keV 的线），核心窗与本底窗一律排除。

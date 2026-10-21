@@ -6,7 +6,7 @@
 """
 import os, sys
 import numpy as np
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sys as _sys; from pathlib import Path as _Path; _sys.path[:0] = [str(_Path(__file__).resolve().parent / _d) for _d in (".",)]  # sibling and shared script modules
 from grid_gap_lightcurve import pass_files, load
 
 TICK = 2.0 ** -22

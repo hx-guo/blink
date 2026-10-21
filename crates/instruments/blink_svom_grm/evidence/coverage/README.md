@@ -9,7 +9,7 @@
 
 复现：
 
-    python3 scripts/plot_svom_coverage.py \
+    python3 scripts/svom/plot_svom_coverage.py \
         crates/instruments/blink_svom_grm/evidence/coverage/features_top899.csv \
         crates/instruments/blink_svom_grm/evidence/coverage/assoc_svom_v6.csv \
         -o svom_coverage.png

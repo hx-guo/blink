@@ -11,5 +11,5 @@
   次要项是堆积（亮暴发看起来更硬）。**报数要写成 ± 0.03 (stat) ± 0.20 (syst)。**
 
 生成：`scripts/cluster/svom_tgf_response.py`（集群，调官方 RSP_Generator 导出逐 TGF 的
-响应与沉积谱）→ `scripts/plot_svom_photon_spectrum.py`（拟合与作图）。
+响应与沉积谱）→ `scripts/svom/plot_svom_photon_spectrum.py`（拟合与作图）。
 入射方向来自 `scripts/cluster/svom_wwlln_match.py`。

@@ -355,15 +355,15 @@ shape 归一化到 N_lost，每个 bin 按比例分配事件数，bin 内等间�
 
 ### 可视化
 
-- `scripts/plot_reconstruct.py` — 光变曲线级别：观测事件 + 填充事件 vs 1K，残差面板
-- `scripts/plot_fifo_resets.py` — 事件级别：每个 FIFO reset 周围 3 个 box 的事件条（观测/填充/SEC）+ 包信息 + 光变曲线（1ms bin）
-- `scripts/plot_hxmt_vs_gbm.py` — 跨卫星验证：HXMT/HE 重建光变 vs Fermi/GBM
-- `scripts/plot_hxmt_vs_gecam.py` — 跨卫星验证：HXMT/HE 重建光变 vs GECAM-C
+- `scripts/saturation/plot_reconstruct.py` — 光变曲线级别：观测事件 + 填充事件 vs 1K，残差面板
+- `scripts/saturation/plot_fifo_resets.py` — 事件级别：每个 FIFO reset 周围 3 个 box 的事件条（观测/填充/SEC）+ 包信息 + 光变曲线（1ms bin）
+- `scripts/gbm/plot_hxmt_vs_gbm.py` — 跨卫星验证：HXMT/HE 重建光变 vs Fermi/GBM
+- `scripts/gecam/plot_hxmt_vs_gecam.py` — 跨卫星验证：HXMT/HE 重建光变 vs GECAM-C
 
 `plot_fifo_resets.py` 用法：
 ```
-python3 scripts/plot_fifo_resets.py --grb 2 --idx 1 40   # 只画第 1、40 个 reset
-python3 scripts/plot_fifo_resets.py --grb 2               # 画全部
+python3 scripts/saturation/plot_fifo_resets.py --grb 2 --idx 1 40   # 只画第 1、40 个 reset
+python3 scripts/saturation/plot_fifo_resets.py --grb 2               # 画全部
 ```
 
 ## 跨卫星验证
@@ -402,7 +402,7 @@ GBM TTE 数据来源：`https://heasarc.gsfc.nasa.gov/FTP/fermi/data/gbm/trigger
 # Scale fit excludes filler-containing bins (26 of 40 used) to avoid circularity:
 # the normalization must not depend on the reconstruction under test.
 # bkg windows avoid the no-data edge [-10,-6.5] of the --before 10 reconstruction window.
-python3 scripts/plot_hxmt_vs_gbm.py --bin 0.5 --det n0 n3 b0 \
+python3 scripts/gbm/plot_hxmt_vs_gbm.py --bin 0.5 --det n0 n3 b0 \
     --bkg -6.5 -2 60 80 --scale-range 20 40 --xlim -6.5 80 --pub \
     -o figures/f7_xsat_260226_gbm.pdf
 # (legacy, pre-2026-07: --emin 200 --emax 900; energy filter since restored as optional)
@@ -410,7 +410,7 @@ python3 scripts/plot_hxmt_vs_gbm.py --bin 0.5 --det n0 n3 b0 \
 # MERGED (2026-07-17): the paper now uses a single 4-panel figure in the
 # former f7 slot (top: broadband; lower three: NaI bands), replacing the
 # separate f7 + f14 pair:
-python3 scripts/plot_260226_combo.py -o figures/f7_xsat_260226_gbm.pdf
+python3 scripts/bursts/plot_260226_combo.py -o figures/f7_xsat_260226_gbm.pdf
 # Reproduces broadband ×0.73 / 1.07±0.22 (38 bins) and NaI scales
 # ×0.023/0.070/0.113; NaI filler-bin ratio medians 1.18/1.23/1.18
 # (paper Sec. 6.5 & Table 4).
@@ -426,26 +426,26 @@ python3 scripts/plot_260226_combo.py -o figures/f7_xsat_260226_gbm.pdf
 # depends on --before/--after. The published NaI numbers require the
 # f14 window (--before 8 --after 80); plot_260226_combo.py hardcodes it.
 # Former standalone NaI-bands command (reference only):
-# python3 scripts/plot_hxmt_vs_gbm_bands.py -o f14_xsat_260226_bands.pdf
+# python3 scripts/bursts/plot_hxmt_vs_gbm_bands.py -o f14_xsat_260226_bands.pdf
 
 # MERGED (2026-07-18): the paper now uses one 4-panel figure at 0.1 s for
 # 250919A (top: 70-700 keV broadband; lower three: 70-150/150-300/300-700
 # keV bands), replacing the separate f15 (0.5 s bands) + f16 (0.1 s single
 # band) pair:
-python3 scripts/plot_250919_combo.py -o figures/f15_xsat_250919_bands.pdf
+python3 scripts/bursts/plot_250919_combo.py -o figures/f15_xsat_250919_bands.pdf
 # Filler-bin HXMT/ext medians: 300-700 keV 1.12 (GBM)/1.08 (SVOM); rising
 # to 1.53/1.40 at 70-150 keV; 1.51/1.37 broadband. Scale fit on the
 # filler-free bins of T0-2..+15; linear background on -30..-24 & 112..130.
 # Former standalone commands (reference only):
-# python3 scripts/plot_hxmt_csi_multi.py --burst 250919A --bin 0.5 --bands \
+# python3 scripts/bursts/plot_hxmt_csi_multi.py --burst 250919A --bin 0.5 --bands \
 #     --xlim -12 28 --pub -o f15_xsat_250919_bands.pdf
-# python3 scripts/plot_hxmt_csi_multi.py --burst 250919A --bin 0.1 --band 300 700 \
+# python3 scripts/bursts/plot_hxmt_csi_multi.py --burst 250919A --bin 0.1 --band 300 700 \
 #     --xlim 2 13 --pub -o f16_xsat_250919_100ms.pdf
 
-# Paper Fig. 11 (f11_200415_failure.pdf): scripts/plot_200415_1ms_failure.py
+# Paper Fig. 11 (f11_200415_failure.pdf): scripts/bursts/plot_200415_1ms_failure.py
 # (no args; writes 200415A_hxmt_vs_asim_1ms.pdf, copy to figures/f11_200415_failure.pdf).
-# Paper Fig. 4: scripts/plot_fig4_solve_vs_1k_221009a.py; Fig. 5:
-# scripts/plot_fig3_wrap_uniqueness.py (both call the current blink CLI;
+# Paper Fig. 4: scripts/grb221009a/plot_fig4_solve_vs_1k_221009a.py; Fig. 5:
+# scripts/saturation/plot_fig3_wrap_uniqueness.py (both call the current blink CLI;
 # leap-second-aware since d1a62f6, T0 = 13:17:00).
 ```
 
@@ -470,7 +470,7 @@ HXMT_1B_DIR=data/1B HXMT_1K_DIR=data/1K ./target/release/blink_cli sat 2022-10-0
   reconstruct 2022-10-09T13:17:02 --before 50 --after 750 > data/cache_221009a_reconstruct.csv
 
 # 秒出图
-python3 scripts/plot_hxmt_vs_gecam.py --cache data/cache_221009a_reconstruct.csv \
+python3 scripts/gecam/plot_hxmt_vs_gecam.py --cache data/cache_221009a_reconstruct.csv \
   --bin 1.0 --bkg 620 670 620 670 --scale-range 400 670 --xlim 397 676
 ```
 

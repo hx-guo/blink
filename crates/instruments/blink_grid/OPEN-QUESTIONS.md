@@ -419,9 +419,9 @@ v3 全量（2026-09-06）：候选 02/03B/04/07 = 51/2380/138/31，显著 4/36/1
   澳大利亚以南 −28..−39°、经度 100–170°E——地磁南极偏向那边，磁纬同样高）。
   像高磁纬的相对论电子沉降（微暴），不像 TGF。TEB（TGF 的电子束）也会落在高磁纬，
   区分要看磁力线足点附近有没有闪电。**足点检验（v10 全量，2026-09-08 更新）：** 用 IGRF
-  把 80 个显著候选的场线追到南北 100 km 足点（`scripts/grid_footpoints.py`），时刻前移
+  把 80 个显著候选的场线追到南北 100 km 足点（`scripts/grid/grid_footpoints.py`），时刻前移
   电子飞行时间（0.95c），近足点用 ±10 ms、远足点用 ±25 ms 跑 `blink wwlln --window-ms`
-  （`scripts/grid_footpoint_tables.py`）。80 个全在 WWLLN 覆盖期内。
+  （`scripts/grid/grid_footpoint_tables.py`）。80 个全在 WWLLN 覆盖期内。
 
   | | 近足点 | 远足点 |
   |---|---|---|
@@ -453,7 +453,7 @@ v3 全量（2026-09-06）：候选 02/03B/04/07 = 51/2380/138/31，显著 4/36/1
   没有 1 ms 偏移，上表的关联数不因这一条作废。被截的是 `grid_footpoints.py` 写出的 `start`
   列（原第 82 行，**已改为写全精度**），但没有下游拿它定时间——它只进 map.csv 当标识。
   仍然成立的是：足点的**经纬度**来自 `features_sig_v10.csv`，那一版的 `dur_us` 与分群
-  `cls` 是在截到毫秒的时刻上量的，所以 `scripts/grid_footpoints.py` 与
+  `cls` 是在截到毫秒的时刻上量的，所以 `scripts/grid/grid_footpoints.py` 与
   `grid_footpoint_tables.py` 仍要按 `features_sig_v12.csv` 重跑一遍再谈结论。长群暂按
   "不进 TGF 目录"处理，依据是谱软、时长毫秒级、零闪电关联，不依赖足点检验。
 - 计数守恒检验（`grid_conserve.py`）排除了"积压事例重盖时间戳"的读出解释：若是重盖戳，
@@ -487,7 +487,7 @@ v10 全量（权威，`gridrun/data`；v3–v9 存 data_v*.tar）：候选 02/03
 软暴 51"，**这个分法已作废，见未决项 14**）。其中轨道后备
 时段（2024-02-08 起）407 个候选、显著 31（短 2、长 29）、关联 0；`positions_from_orbit_fit`
 03B/04/07 = 256/61/88，仍无星历 228/88/52。02/04/07 的显著全是高纬毫秒级软暴。图：
-`scripts/plot_grid_populations.py`（`scratch_gbm/grid_populations_v10.png`）。
+`scripts/grid/plot_grid_populations.py`（`scratch_gbm/grid_populations_v10.png`）。
 
 仍未做：
 
@@ -880,7 +880,7 @@ A/B 两角的硬度差别仍然在（Mann–Whitney p 从 1.1×10⁻⁹ 变成 2
 硬"这个**方向**稳，"硬度 4.24"这个**数值**不能当定论。注意扣掉的不全是堆积——真暴本来
 就有 > 1 MeV 光子，本底里那一区也占 3%–9%——所以扣后的值是硬度的**下限**。
 
-讲图（`scripts/plot_grid_talk.py`）已按新分组重画，三张图分别是：T90 × 磁纬的两个角、
+讲图（`scripts/talks/plot_grid_talk.py`）已按新分组重画，三张图分别是：T90 × 磁纬的两个角、
 T90 × 硬度、硬度的噪声底。
 
 ### 15. 逐探头量程上限：超量程沉积以硬光子身份进了搜索（2026-09-10）

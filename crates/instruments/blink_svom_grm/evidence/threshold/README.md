@@ -7,5 +7,5 @@
 - `burst.csv`：各道段事例落在"≥5 个/ms"格子里的占比（低道是否成簇）。
 - `ebounds.csv`：EBOUNDS 道–keV 对照。
 
-生成：`scripts/cluster/svom_spectra.py`（集群，读 L1B）→ `scripts/plot_svom_threshold.py`。
+生成：`scripts/cluster/svom_spectra.py`（集群，读 L1B）→ `scripts/svom/plot_svom_threshold.py`。
 结论见上一级的 `OPEN-QUESTIONS.md` 第 14 条。

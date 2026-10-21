@@ -425,5 +425,5 @@ UNWRAP gap ds=3: 37154/37154 events, 2 wraps, 0 ghosts, residual 64 ticks
 `fifo_resets` 页逐条给 `n_lost_recon` 与 `fill_kind`。它是**整条 gap** 的重建值，
 跨窗口边缘的 gap 会比窗级总数多算边缘外那部分（差 0.06% 量级）；窗级数以主表为准。
 
-复核用的光变脚本：`scripts/plot_heb_marginal_holes.py`、`plot_heb_marginal_stack.py`、
+复核用的光变脚本：`scripts/saturation/plot_heb_marginal_holes.py`、`plot_heb_marginal_stack.py`、
 `plot_heb_reset_skytest.py`、`plot_heb_hole_vs_rate.py`。

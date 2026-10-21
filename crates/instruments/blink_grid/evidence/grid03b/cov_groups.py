@@ -19,7 +19,7 @@ import csv
 
 import numpy as np
 
-# 与 scripts/plot_grid_talk.py 一致的分群轴
+# 与 scripts/talks/plot_grid_talk.py 一致的分群轴
 T90_CUT_US = 2000.0
 MLAT_CUT_DEG = 33.0
 POLE_LAT, POLE_LON = np.radians(80.7), np.radians(-72.7)

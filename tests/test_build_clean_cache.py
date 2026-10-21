@@ -1,11 +1,11 @@
-"""Tests for scripts/build_clean_cache.py."""
+"""Tests for scripts/saturation/build_clean_cache.py."""
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
 import pytest
 
-# conftest.py already adds scripts/ to sys.path
+# conftest.py already adds scripts/saturation/ to sys.path
 # Tests will `import build_clean_cache as M` once that script exists.
 
 

@@ -6,8 +6,8 @@ cross-ref gap 算 pull = (fill − truth) / σ，其中 σ 由 `recovery_cov.cov
 pull.mean / pull.std / bias。
 
 复现（250919A，需 HXMT_1B_DIR 指向本地 data/1B、blink release 已 build）：
-  scripts/injection_validation.sh <out_dir>          # measured 腿 → pull.std≈1.05
-  scripts/injection_validation.sh <out_dir> --cosat  # 共饱和 empty 腿 → pull.std≈1.00
+  scripts/saturation/injection_validation.sh <out_dir>          # measured 腿 → pull.std≈1.05
+  scripts/saturation/injection_validation.sh <out_dir> --cosat  # 共饱和 empty 腿 → pull.std≈1.00
 或手动：blink sat inject … --events-out/--gapcov-out/--gapbins-out/--truth-out，再
   python analysis/injection_pull.py <out_dir>
 """

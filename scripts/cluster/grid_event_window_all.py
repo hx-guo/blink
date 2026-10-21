@@ -6,7 +6,7 @@
 import datetime as dt, os, sys
 import numpy as np
 from astropy.io import fits
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sys as _sys; from pathlib import Path as _Path; _sys.path[:0] = [str(_Path(__file__).resolve().parent / _d) for _d in (".",)]  # sibling and shared script modules
 from grid_gap_lightcurve import pass_files
 
 sat, iso, half, out = sys.argv[1], sys.argv[2], float(sys.argv[3]), sys.argv[4]

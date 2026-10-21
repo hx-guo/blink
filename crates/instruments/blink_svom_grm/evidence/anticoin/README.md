@@ -11,4 +11,4 @@
 
 数据取 2024-07-03 的 12 个整点小时（每 2 小时一个），1.7 亿个事例。
 生成：`scripts/cluster/svom_anticoin.py`、`scripts/cluster/svom_anticoin_gcd.py`
-→ `scripts/plot_svom_anticoin.py`。
+→ `scripts/svom/plot_svom_anticoin.py`。

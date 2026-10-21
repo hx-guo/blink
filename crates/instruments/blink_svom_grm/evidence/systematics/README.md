@@ -9,7 +9,7 @@
   附入射角、落点距离、源天顶角、空气质量、死时间占比、核心窗计数与脉冲宽度。
 - `svom_photon_systematics.png`：α 沿 θ、α 沿 sec ζ、注量分布三张图。
 
-生成：`scripts/plot_svom_photon_systematics.py`，输入是
+生成：`scripts/svom/plot_svom_photon_systematics.py`，输入是
 `scripts/cluster/svom_tgf_response.py` 导出的 npz 与
 `scripts/cluster/svom_wwlln_match.py` 的入射方向表。
 交接道表由 `scripts/cluster/svom_seam_per_tgf.py` 给。
@@ -25,4 +25,4 @@
   1.452 ± 0.119，**差 3.6σ，所以那个软超出是仪器不是源**；③ 把背面响应乘常数或
   乘能量幂律的扰动扫描——数据偏好背面 42–80 keV 面积比 CALDB 大 2–3 倍
   （ΔCash −12.5），但任何能抹平 β_θ 的平滑改正都被数据拒绝（ΔCash +23 到 +36）。
-  生成：`scripts/diag_svom_theta_mechanism.py`。
+  生成：`scripts/svom/diag_svom_theta_mechanism.py`。

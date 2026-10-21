@@ -1,13 +1,13 @@
 """讲稿用缓冲区光变的数据：同一颗卫星上 GRID-03B 与 GRID-04 同一次过境。
 
 导出：两颗星的逐秒计数（整次过境），以及 03B 最高计数率处前后 1.5 s 的逐事例时刻（两颗星都取），
-画图在本地做（scripts/plot_grid_readout_slides.py）。事例准入与 grid_gap_lightcurve.py 相同。
+画图在本地做（scripts/talks/plot_grid_readout_slides.py）。事例准入与 grid_gap_lightcurve.py 相同。
 
 用法: python3 grid_buffer_slide_data.py <day YYYY-MM-DD> <03B 文件名> <04 文件名> <中心 MET> <输出 npz>
 """
 import os, sys
 import numpy as np
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sys as _sys; from pathlib import Path as _Path; _sys.path[:0] = [str(_Path(__file__).resolve().parent / _d) for _d in (".",)]  # sibling and shared script modules
 from grid_gap_lightcurve import pass_files, load
 
 day, f3, f4, centre, out = sys.argv[1], sys.argv[2], sys.argv[3], float(sys.argv[4]), sys.argv[5]
