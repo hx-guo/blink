@@ -10,7 +10,7 @@ use crate::{
 /// 反符合探测器（ACD）符合计数，候选生成时从事例流现场统计——事后无法从
 /// 候选表复原，必须随产物保存。只存原始计数不存比例：保泊松误差，阈值可
 /// 复议而不必重跑全量。仅 HXMT HE 填写；无 ACD 的仪器留 `None`。
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AcdCounts {
     /// 候选窗 [start, stop] 内 kept 事例总数。自带分母：不依赖 `count`
     /// 的分箱语义，占比 n_acd/n 自洽。

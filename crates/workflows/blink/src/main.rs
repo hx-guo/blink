@@ -205,6 +205,34 @@ fn main() {
         TopCommands::AcdAudit { list, out, scint } => {
             commands::acd_audit::cmd_acd_audit(&list, &out, &scint);
         }
+        TopCommands::Vet {
+            from,
+            to,
+            list,
+            out,
+            max_fa,
+            force,
+            workers,
+            worker,
+            instrument,
+        } => {
+            assert!(
+                instrument == Instrument::HxmtHe,
+                "vet: only hxmt-he is implemented, got {instrument:?}"
+            );
+            if let Some(list) = list {
+                let out = out.expect("--list requires -o");
+                commands::vet::cmd_vet_list(&list, &out);
+            } else {
+                let parse = |s: &str| {
+                    chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d")
+                        .unwrap_or_else(|e| panic!("invalid date '{s}': {e}"))
+                };
+                let (from, to) = (parse(&from.unwrap()), parse(&to.unwrap()));
+                assert!(workers >= 1 && worker < workers, "--worker out of range");
+                commands::vet::cmd_vet_days(from, to, workers, worker, max_fa, force);
+            }
+        }
         TopCommands::Catalog { input, out } => {
             commands::catalog::cmd_catalog(&input, &out);
         }

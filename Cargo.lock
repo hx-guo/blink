@@ -106,6 +106,7 @@ dependencies = [
  "blink_wwlln",
  "chrono",
  "clap",
+ "serde",
  "serde_json",
  "uom",
 ]

@@ -34,6 +34,38 @@ pub enum TopCommands {
         #[arg(long, value_enum, default_value_t = Instrument::HxmtHe)]
         instrument: Instrument,
     },
+    /// Vet candidates (GRB extended-emission rule, ACD electron-beam test, light curves).
+    /// Day mode reads YYYYMMDD_signals.json and writes YYYYMMDD_vet.json next to it;
+    /// list mode appends the verdict columns to any CSV with start/stop columns.
+    Vet {
+        /// Start date (YYYY-MM-DD); omit with --list
+        #[arg(required_unless_present = "list")]
+        from: Option<String>,
+        /// End date (YYYY-MM-DD); omit with --list
+        #[arg(required_unless_present = "list")]
+        to: Option<String>,
+        /// Vet the windows of this CSV instead of the daily signals files
+        #[arg(long, conflicts_with_all = ["from", "to"], requires = "out")]
+        list: Option<PathBuf>,
+        /// Output CSV of --list mode
+        #[arg(short, long)]
+        out: Option<PathBuf>,
+        /// Only candidates with false_positive_per_year <= this (day mode)
+        #[arg(long, default_value_t = 1e-5)]
+        max_fa: f64,
+        /// Rewrite vet files even if newer than their sources (day mode)
+        #[arg(long)]
+        force: bool,
+        /// Total number of parallel workers (days are sharded round-robin)
+        #[arg(long, default_value_t = 1)]
+        workers: usize,
+        /// This worker's index in [0, workers)
+        #[arg(long, default_value_t = 0)]
+        worker: usize,
+        /// Instrument (only hxmt-he is implemented)
+        #[arg(long, value_enum, default_value_t = Instrument::HxmtHe)]
+        instrument: Instrument,
+    },
     /// WWLLN lightning association + REP train-density enrichment for detected signals
     Wwlln {
         /// Instrument whose candidates to enrich

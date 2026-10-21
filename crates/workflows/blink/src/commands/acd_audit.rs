@@ -26,7 +26,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 /// 与 util::parse_met_or_utc 同语义，但不逐行打印（审计表几千行）。
-fn parse_time(s: &str) -> Option<f64> {
+pub(crate) fn parse_time(s: &str) -> Option<f64> {
     let s = s.trim();
     if let Ok(met) = s.parse::<f64>() {
         return Some(met);

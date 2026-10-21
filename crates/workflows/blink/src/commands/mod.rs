@@ -7,3 +7,4 @@ pub mod extract;
 pub mod inject;
 pub mod reconstruct;
 pub mod report;
+pub mod vet;

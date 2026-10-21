@@ -15,5 +15,6 @@ blink_search = { version = "0.1.0", path = "../blink_search" }
 blink_svom_grm = { version = "0.1.0", path = "../../instruments/blink_svom_grm" }
 chrono = "0.4.43"
 clap = { version = "4.5.54", features = ["derive"] }
+serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 uom = { version = "0.37.0", features = ["serde"] }
