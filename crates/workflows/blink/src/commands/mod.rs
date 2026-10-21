@@ -4,6 +4,7 @@ pub mod catalog_pipeline;
 pub mod compare;
 pub mod detect;
 pub mod dump;
+pub mod export;
 pub mod extract;
 pub mod inject;
 pub mod name;

@@ -136,6 +136,28 @@ pub enum TopCommands {
         #[arg(long)]
         allow_dirty: bool,
     },
+    /// Export the website data: pipeline catalogs + name registry + vet light curves
+    /// -> index.json, latest.json, names.json and per-instrument catalog/event files.
+    Export {
+        /// Catalog directories written by `blink catalog --out-dir`
+        #[arg(required = true)]
+        catalogs: Vec<PathBuf>,
+        /// Name registry directory
+        #[arg(long)]
+        registry: PathBuf,
+        /// Root of the daily files (for the vet light curves)
+        #[arg(long, default_value = "data")]
+        data: PathBuf,
+        /// Output directory (e.g. web/public/data)
+        #[arg(long, short = 'o')]
+        out: PathBuf,
+        /// Only instruments listed in the registry's public_instruments.txt
+        #[arg(long)]
+        public_only: bool,
+        /// Number of most recent events in latest.json
+        #[arg(long, default_value_t = 20)]
+        latest: usize,
+    },
     /// Catalog stage. Two modes:
     /// `-o CSV`: paper catalog from tgfs.json of `blink wwlln` (train removal, then
     /// fa <= 1e-5, or fa <= 1 with lightning association).

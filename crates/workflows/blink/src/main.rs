@@ -261,6 +261,21 @@ fn main() {
                 commands::vet::cmd_vet_days(from, to, workers, worker, max_fa, force);
             }
         }
+        TopCommands::Export {
+            catalogs,
+            registry,
+            data,
+            out,
+            public_only,
+            latest,
+        } => commands::export::cmd_export(&commands::export::ExportArgs {
+            catalogs: &catalogs,
+            registry: &registry,
+            data: &data,
+            out: &out,
+            public_only,
+            latest,
+        }),
         TopCommands::Name {
             catalog,
             registry,
