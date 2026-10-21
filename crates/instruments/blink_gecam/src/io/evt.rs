@@ -25,9 +25,6 @@ use gti_hdu::GtiHdu;
 use crate::types::event::{ChannelWindow, MIN_ENERGY_KEV};
 use crate::types::{Event, instrument::Satellite};
 
-/// 探头数的上限，只用来给「一直探到读不着为止」的循环封顶。GECAM-B/A 是
-/// 25 路、C 是 12 路，实际路数由文件里有几个 `EVENTS%02d` 决定，不写死。
-const MAX_DETECTORS: u8 = 99;
 
 pub struct EvtFile<S: Satellite> {
     gti: GtiHdu,
@@ -36,6 +33,37 @@ pub struct EvtFile<S: Satellite> {
     /// 本文件的事例准入道号窗，由本文件的 EBOUNDS 现算。**不是编译期常量**
     /// ——归档里有两把能量梯，见 [`ebounds_hdu`]。
     channels: ChannelWindow,
+}
+
+/// 文件里各 HDU 的 EXTNAME（转成大写）；没有 EXTNAME 的（主 HDU）跳过。
+fn extnames(fptr: &mut fitsio::FitsFile) -> Result<Vec<String>, fitsio::errors::Error> {
+    let mut names = Vec::new();
+    for index in 0..fptr.num_hdus()? {
+        let hdu = fptr.hdu(index)?;
+        if let Ok(name) = hdu.read_key::<String>(fptr, "EXTNAME") {
+            names.push(name.trim().to_uppercase());
+        }
+    }
+    Ok(names)
+}
+
+/// GRD 事例表的路数。表名必须是从 `EVENTS01` 起不断号、不重号的一段：中间
+/// 缺一张就是产品出了问题，不能只读到断号处、把后面几路悄悄丢掉。
+fn grd_table_count(extnames: &[String]) -> Result<u8, String> {
+    let mut ids: Vec<u8> = extnames
+        .iter()
+        .filter_map(|name| name.strip_prefix("EVENTS"))
+        .filter(|digits| digits.len() == 2)
+        .filter_map(|digits| digits.parse().ok())
+        .collect();
+    ids.sort_unstable();
+    if ids.is_empty() {
+        return Err("一个 EVENTS 表也没有".to_string());
+    }
+    if ids.iter().zip(1..).any(|(&id, expected)| id != expected) {
+        return Err(format!("EVENTS 表不是从 01 起连续的一段：{ids:?}"));
+    }
+    Ok(ids.len() as u8)
 }
 
 impl<S: Satellite> EvtFile<S> {
@@ -52,16 +80,14 @@ impl<S: Satellite> EvtFile<S> {
         let channels = ChannelWindow::new(ladder.min_channel, ladder.length);
         let gti = GtiHdu::from_fptr(&mut fptr)?;
 
-        // 路数随星而异（A/B 25 路、C 12 路），探到读不着为止
+        // 路数随星而异（A/B 25 路、C 12 路），由文件里的表名定；每一路都必须读得出来
+        let count = grd_table_count(&extnames(&mut fptr)?)
+            .map_err(|error| Error::InvalidData(format!("{path}: {error}")))?;
         let mut detectors = Vec::new();
-        for id in 1..=MAX_DETECTORS {
-            match EventsHdu::from_fptr(&mut fptr, id) {
-                Ok(hdu) => detectors.push(hdu),
-                Err(_) => break,
-            }
-        }
-        if detectors.is_empty() {
-            return Err(Error::InvalidData(format!("{path} 里一个 EVENTS 表也没有")));
+        for id in 1..=count {
+            let hdu = EventsHdu::from_fptr(&mut fptr, id)
+                .map_err(|error| Error::InvalidData(format!("{path}: EVENTS{id:02}: {error}")))?;
+            detectors.push(hdu);
         }
 
         let time_reversals = detectors
@@ -157,5 +183,36 @@ impl<S: Satellite> Iterator for EvtFileIter<'_, S> {
             self.buffer.push(Reverse((next_event, index)));
         }
         Some(event)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn names(list: &[&str]) -> Vec<String> {
+        list.iter().map(|name| name.to_string()).collect()
+    }
+
+    #[test]
+    fn table_count_is_the_unbroken_run_from_01() {
+        let mut list = vec!["EBOUNDS", "GTI"];
+        let events: Vec<String> = (1..=25).rev().map(|id| format!("EVENTS{id:02}")).collect();
+        list.extend(events.iter().map(String::as_str));
+        assert_eq!(grd_table_count(&names(&list)), Ok(25));
+    }
+
+    #[test]
+    fn missing_or_repeated_table_is_an_error() {
+        assert!(grd_table_count(&names(&["EVENTS01", "EVENTS02", "EVENTS04"])).is_err());
+        assert!(grd_table_count(&names(&["EVENTS02", "EVENTS03"])).is_err());
+        assert!(grd_table_count(&names(&["EVENTS01", "EVENTS01", "EVENTS02"])).is_err());
+        assert!(grd_table_count(&names(&["EBOUNDS", "GTI"])).is_err());
+    }
+
+    #[test]
+    fn other_names_are_not_detector_tables() {
+        let list = names(&["EVENTS01", "EVENTS02", "EVENTS", "EVENTS003", "EVENTSXY"]);
+        assert_eq!(grd_table_count(&list), Ok(2));
     }
 }
