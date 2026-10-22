@@ -63,10 +63,10 @@ pub struct AttFile {
 }
 
 impl AttFile {
-    pub fn from_fits_file(path: &str) -> Result<Self, fitsio::errors::Error> {
-        let mut fptr = fitsio::FitsFile::open(path)?;
+    pub fn from_fits_file(path: &str) -> Result<Self, fitsio_pure::compat::errors::Error> {
+        let fptr = fitsio_pure::compat::fitsfile::FitsFile::open(path)?;
 
-        let quaternion = QuaternionHdu::from_fptr(&mut fptr)?;
+        let quaternion = QuaternionHdu::from_fptr(&fptr)?;
 
         Ok(Self { quaternion })
     }
@@ -89,7 +89,9 @@ struct QuaternionHdu {
 }
 
 impl QuaternionHdu {
-    fn from_fptr(fptr: &mut fitsio::FitsFile) -> Result<Self, fitsio::errors::Error> {
+    fn from_fptr(
+        fptr: &fitsio_pure::compat::fitsfile::FitsFile,
+    ) -> Result<Self, fitsio_pure::compat::errors::Error> {
         let quaternion = fptr.hdu("Quaternion")?;
 
         let time = quaternion.read_col::<f64>(fptr, "TIME")?;

@@ -9,7 +9,7 @@ No.    Name      Ver    Type      Cards   Dimensions   Format
 
 use crate::types::Detector;
 
-/// 一个探头一小时的 TTE。文件是 gzip 压缩的，cfitsio 透明解压。
+/// 一个探头一小时的 TTE。文件是 gzip 压缩的，fitsio-pure 透明解压。
 pub struct TteFile {
     pub detector: Detector,
     /// 本文件是 14 路里的哪一路，下标按 `Detector::UNIT_NAMES`。
@@ -26,16 +26,16 @@ impl TteFile {
         path: &str,
         detector: Detector,
         unit: u8,
-    ) -> Result<Self, fitsio::errors::Error> {
-        let mut fptr = fitsio::FitsFile::open(path)?;
+    ) -> Result<Self, fitsio_pure::compat::errors::Error> {
+        let fptr = fitsio_pure::compat::fitsfile::FitsFile::open(path)?;
 
         let events = fptr.hdu("EVENTS")?;
-        let time = events.read_col::<f64>(&mut fptr, "TIME")?;
-        let pha = events.read_col::<i16>(&mut fptr, "PHA")?;
+        let time = events.read_col::<f64>(&fptr, "TIME")?;
+        let pha = events.read_col::<i16>(&fptr, "PHA")?;
 
         let gti = fptr.hdu("GTI")?;
-        let gti_start = gti.read_col::<f64>(&mut fptr, "START")?;
-        let gti_stop = gti.read_col::<f64>(&mut fptr, "STOP")?;
+        let gti_start = gti.read_col::<f64>(&fptr, "START")?;
+        let gti_stop = gti.read_col::<f64>(&fptr, "STOP")?;
 
         Ok(Self {
             detector,

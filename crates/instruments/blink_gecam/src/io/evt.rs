@@ -36,7 +36,9 @@ pub struct EvtFile<S: Satellite> {
 }
 
 /// 文件里各 HDU 的 EXTNAME（转成大写）；没有 EXTNAME 的（主 HDU）跳过。
-fn extnames(fptr: &mut fitsio::FitsFile) -> Result<Vec<String>, fitsio::errors::Error> {
+fn extnames(
+    fptr: &fitsio_pure::compat::fitsfile::FitsFile,
+) -> Result<Vec<String>, fitsio_pure::compat::errors::Error> {
     let mut names = Vec::new();
     for index in 0..fptr.num_hdus()? {
         let hdu = fptr.hdu(index)?;
@@ -68,24 +70,24 @@ fn grd_table_count(extnames: &[String]) -> Result<u8, String> {
 
 impl<S: Satellite> EvtFile<S> {
     pub fn from_fits_file(path: &str) -> Result<Self, Error> {
-        let mut fptr = fitsio::FitsFile::open(path)?;
+        let fptr = fitsio_pure::compat::fitsfile::FitsFile::open(path)?;
 
         // 能量梯必须是标定过的那把尺子（ch0 = 2.00 keV、梯内逐道连续、梯顶
         // 10053.5 keV），梯长与能阈道由这张表自己给出——**归档里有两把梯子，
         // 同一个道号在它们上面差一倍能量**，照搬道号会把能窗整个搬错位。
-        let ebounds = EboundsHdu::from_fptr(&mut fptr)?;
+        let ebounds = EboundsHdu::from_fptr(&fptr)?;
         let ladder = ebounds
             .ladder(MIN_ENERGY_KEV)
             .map_err(|error| Error::InvalidData(format!("{path}: {error}")))?;
         let channels = ChannelWindow::new(ladder.min_channel, ladder.length);
-        let gti = GtiHdu::from_fptr(&mut fptr)?;
+        let gti = GtiHdu::from_fptr(&fptr)?;
 
         // 路数随星而异（A/B 25 路、C 12 路），由文件里的表名定；每一路都必须读得出来
-        let count = grd_table_count(&extnames(&mut fptr)?)
+        let count = grd_table_count(&extnames(&fptr)?)
             .map_err(|error| Error::InvalidData(format!("{path}: {error}")))?;
         let mut detectors = Vec::new();
         for id in 1..=count {
-            let hdu = EventsHdu::from_fptr(&mut fptr, id)
+            let hdu = EventsHdu::from_fptr(&fptr, id)
                 .map_err(|error| Error::InvalidData(format!("{path}: EVENTS{id:02}: {error}")))?;
             detectors.push(hdu);
         }

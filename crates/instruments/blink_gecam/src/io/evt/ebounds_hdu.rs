@@ -57,7 +57,9 @@ pub(super) struct EboundsHdu {
 }
 
 impl EboundsHdu {
-    pub fn from_fptr(fptr: &mut fitsio::FitsFile) -> Result<Self, fitsio::errors::Error> {
+    pub fn from_fptr(
+        fptr: &fitsio_pure::compat::fitsfile::FitsFile,
+    ) -> Result<Self, fitsio_pure::compat::errors::Error> {
         let ebounds = fptr.hdu("EBOUNDS")?;
         Ok(Self {
             e_min: ebounds.read_col::<f32>(fptr, "E_MIN")?,
