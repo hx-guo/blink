@@ -135,6 +135,11 @@ impl Rejection {
 /// 数据缺失（`MissingData`）的小时要等多久才算定论：实时运行时文件可能只是还没到
 pub const DEFAULT_SETTLE_DAYS: i64 = 7;
 
+/// GRB 判据的最大组占比；不分组的仪器（GBM）没有这个量，留空
+fn group_share(vet: &&Vet) -> Option<String> {
+    (vet.grb.group_excess.len() > 1).then(|| format!("{:.3}", vet.grb.max_group_share))
+}
+
 pub fn cmd_catalog_pipeline<I: Instrument>(
     data: &Path,
     out_dir: &Path,
@@ -306,7 +311,7 @@ pub fn cmd_catalog_pipeline<I: Instrument>(
                 .format("%H:%M:%S"),
             neighbors[i],
             vet.and_then(|v| v.grb.z).map(|z| format!("{z:.2}")).unwrap_or_default(),
-            vet.map(|v| format!("{:.3}", v.grb.max_group_share)).unwrap_or_default(),
+            vet.and_then(group_share).unwrap_or_default(),
             beam.map(|b| (b.flagged as u8).to_string()).unwrap_or_default(),
             beam.map(|b| format!("{:.3e}", b.p)).unwrap_or_default(),
             vet.map(|v| format!("{:.3}", v.det_share_max)).unwrap_or_default(),
@@ -332,7 +337,7 @@ pub fn cmd_catalog_pipeline<I: Instrument>(
             reason.as_str(),
             neighbors[*i],
             vet.and_then(|v| v.grb.z).map(|z| format!("{z:.2}")).unwrap_or_default(),
-            vet.map(|v| format!("{:.3}", v.grb.max_group_share)).unwrap_or_default(),
+            vet.and_then(group_share).unwrap_or_default(),
         ));
     }
     fs::write(out_dir.join("rejected.csv"), rejected_rows).expect("failed to write rejected.csv");
