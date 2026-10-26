@@ -55,7 +55,8 @@ pub enum TopCommands {
         #[arg(long, value_enum, default_value_t = Instrument::HxmtHe)]
         instrument: Instrument,
     },
-    /// Vet candidates (GRB extended-emission rule, ACD electron-beam test, light curves).
+    /// Vet candidates (GRB extended-emission rule, ACD electron-beam test where there are ACDs,
+    /// light curves); hxmt-he and fermi-gbm.
     /// Day mode reads YYYYMMDD_signals.json and writes YYYYMMDD_vet.json next to it;
     /// list mode appends the verdict columns to any CSV with start/stop columns.
     Vet {

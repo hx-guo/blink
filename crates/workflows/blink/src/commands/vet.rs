@@ -23,20 +23,23 @@
 //! 判据要候选前后 2 s 的事例，候选靠近整点时会读相邻小时（跨天也一样）。
 //! 相邻小时缺失时本底有缺口，`Z` 给 `None`——这种候选在实时管线里不能定为 final。
 //!
-//! 目前只实现 Insight-HXMT/HE：事例载入与机箱、ACD 都是 HXMT 的。
+//! 仪器侧只需实现 [`VetSource`]：事例载入、GRB 判据的分组、逐路编号，有 ACD 的
+//! 再给电子束检验。现有 Insight-HXMT/HE（三机箱分组、ACD）与 Fermi/GBM（不分组、
+//! 无 ACD）。
 
 use crate::commands::acd_audit::parse_time;
 use blink_algorithms::detector_share::max_detector_fraction;
 use blink_algorithms::extended_emission::{
     ExtendedEmission, ExtendedEmissionConfig, extended_emission,
 };
-use blink_core::traits::{Event as _, Instrument as _};
+use blink_core::traits::{Chunk as _, Event as _, Instrument};
 use blink_core::types::{AcdCounts, MissionElapsedTime, UnifiedSignal};
+use blink_fermi_gbm::types::FermiGbm;
 use blink_hxmt_he::algorithms::acd::{
     BEAM_P_THRESHOLD, acd_counts, acd_top_side, beam_probability,
 };
 use blink_hxmt_he::io::level_1k::EventFile;
-use blink_hxmt_he::types::{Event, HxmtHe};
+use blink_hxmt_he::types::HxmtHe;
 use chrono::TimeDelta;
 use chrono::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -44,11 +47,99 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// 复核要的仪器侧接口。
+pub trait VetSource: Instrument {
+    type Event: blink_core::traits::Event<Instrument = Self> + Clone;
+    /// GRB 判据的分组数（单组时只看 `Z`，见 `extended_emission`）
+    const N_GROUPS: usize;
+    fn group(event: &Self::Event) -> usize;
+    /// 逐路探测器编号：单路占比与光变曲线用
+    fn unit(event: &Self::Event) -> u8;
+    fn lc_channel(event: &Self::Event) -> u16;
+    /// 光变曲线里的 ACD 着火位；没有 ACD 的仪器为 0
+    fn lc_acd(_event: &Self::Event) -> u32 {
+        0
+    }
+    /// 一小时内搜索所用的事例（准入之后），按时间排序
+    fn hour_events(hour: &DateTime<Utc>) -> Result<Vec<Self::Event>, String>;
+    /// 这一小时数据文件的最后修改时间（数据重发会更新它）
+    fn hour_modified(hour: &DateTime<Utc>) -> Option<DateTime<Utc>>;
+    /// ACD 符合计数与电子束检验；没有 ACD 的仪器为 `None`
+    fn acd(_events: &[Self::Event], _start: f64, _stop: f64) -> Option<(AcdCounts, ElectronBeam)> {
+        None
+    }
+}
+
 /// HE 三个机箱各 6 路：Box A = 0..=5，B = 6..=11，C = 12..=17
 /// （见 `blink_hxmt_he::algorithms::detectors::N_DETECTORS` 的实测说明）。
-const N_BOXES: usize = 3;
-fn box_of(event: &Event) -> usize {
-    event.detector.id as usize / 6
+impl VetSource for HxmtHe {
+    type Event = blink_hxmt_he::types::Event;
+    const N_GROUPS: usize = 3;
+    fn group(event: &Self::Event) -> usize {
+        event.detector.id as usize / 6
+    }
+    fn unit(event: &Self::Event) -> u8 {
+        event.detector.id
+    }
+    fn lc_channel(event: &Self::Event) -> u16 {
+        event.channel()
+    }
+    fn lc_acd(event: &Self::Event) -> u32 {
+        event
+            .acds
+            .iter()
+            .enumerate()
+            .fold(0u32, |bits, (j, &fired)| bits | ((fired as u32) << j))
+    }
+    fn hour_events(hour: &DateTime<Utc>) -> Result<Vec<Self::Event>, String> {
+        let file = EventFile::from_epoch(hour).map_err(|e| e.to_string())?;
+        let mut events: Vec<Self::Event> = file.into_iter().filter(|e| e.keep()).collect();
+        events.sort_by_key(|e| e.time());
+        Ok(events)
+    }
+    fn hour_modified(hour: &DateTime<Utc>) -> Option<DateTime<Utc>> {
+        EventFile::last_modified(hour).ok()
+    }
+    fn acd(events: &[Self::Event], start: f64, stop: f64) -> Option<(AcdCounts, ElectronBeam)> {
+        let top_side = acd_top_side(events, start, stop);
+        let p = beam_probability(top_side);
+        Some((
+            acd_counts(events, start, stop),
+            ElectronBeam {
+                top_only: top_side.top_only,
+                side_only: top_side.side_only,
+                p,
+                flagged: p < BEAM_P_THRESHOLD,
+            },
+        ))
+    }
+}
+
+/// GBM 不分组：12 个 NaI 与 2 个 BGO 朝向各不相同，GRB 的超出本来就不均匀，
+/// 分组占比判据挡的是 HXMT 单机箱的时间标签错，这里没有对应物。没有 ACD。
+impl VetSource for FermiGbm {
+    type Event = blink_fermi_gbm::types::Event;
+    const N_GROUPS: usize = 1;
+    fn group(_event: &Self::Event) -> usize {
+        0
+    }
+    fn unit(event: &Self::Event) -> u8 {
+        event.unit
+    }
+    fn lc_channel(event: &Self::Event) -> u16 {
+        // keep() 之后道址在 1..=126
+        event.channel as u16
+    }
+    fn hour_events(hour: &DateTime<Utc>) -> Result<Vec<Self::Event>, String> {
+        let chunk = <FermiGbm as Instrument>::Chunk::from_epoch(hour).map_err(|e| e.to_string())?;
+        if let Some(reason) = chunk.exclusion() {
+            return Err(format!("excluded: {reason:?}"));
+        }
+        Ok(chunk.events_in_gti().0)
+    }
+    fn hour_modified(hour: &DateTime<Utc>) -> Option<DateTime<Utc>> {
+        <FermiGbm as Instrument>::Chunk::last_modified(hour).ok()
+    }
 }
 
 /// 光变曲线逐事例的范围：候选窗两侧各外扩这么多（秒）
@@ -108,46 +199,41 @@ pub struct Vet {
 struct Verdict {
     grb: ExtendedEmission,
     det_share_max: f64,
-    acd: AcdCounts,
-    beam: ElectronBeam,
+    acd: Option<AcdCounts>,
+    beam: Option<ElectronBeam>,
 }
 
-fn verdict(events: &[Event], start: f64, stop: f64, config: &ExtendedEmissionConfig) -> Verdict {
-    let grb = extended_emission(events, start, stop, N_BOXES, box_of, config);
-    let top_side = acd_top_side(events, start, stop);
-    let p = beam_probability(top_side);
+fn verdict<I: VetSource>(
+    events: &[I::Event],
+    start: f64,
+    stop: f64,
+    config: &ExtendedEmissionConfig,
+) -> Verdict {
+    let grb = extended_emission(events, start, stop, I::N_GROUPS, I::group, config);
+    let (acd, beam) = I::acd(events, start, stop).unzip();
     Verdict {
         grb,
         det_share_max: max_detector_fraction(
             events,
             MissionElapsedTime::new(start),
             MissionElapsedTime::new(stop),
-            |e| e.detector.id,
+            I::unit,
         ),
-        acd: acd_counts(events, start, stop),
-        beam: ElectronBeam {
-            top_only: top_side.top_only,
-            side_only: top_side.side_only,
-            p,
-            flagged: p < BEAM_P_THRESHOLD,
-        },
+        acd,
+        beam,
     }
 }
 
-fn light_curve(events: &[Event], start: f64, stop: f64, peak: f64) -> LightCurve {
+fn light_curve<I: VetSource>(events: &[I::Event], start: f64, stop: f64, peak: f64) -> LightCurve {
     let at = |t: f64| events.partition_point(|e| e.time().met() < t);
     let near = &events[at(start - LC_PAD_S)..at(stop + LC_PAD_S)];
     let lc_events = near
         .iter()
         .map(|e| LcEvent {
             t_us: (e.time().met() - peak) * 1e6,
-            det: e.detector.id,
-            channel: e.channel(),
-            acd: e
-                .acds
-                .iter()
-                .enumerate()
-                .fold(0u32, |bits, (j, &fired)| bits | ((fired as u32) << j)),
+            det: I::unit(e),
+            channel: I::lc_channel(e),
+            acd: I::lc_acd(e),
         })
         .collect();
     let n_bins = (2.0 * CONTEXT_HALF_S / CONTEXT_BIN_S).round() as usize;
@@ -159,7 +245,7 @@ fn light_curve(events: &[Event], start: f64, stop: f64, peak: f64) -> LightCurve
         }
     }
     LightCurve {
-        peak: MissionElapsedTime::<HxmtHe>::new(peak).to_utc(),
+        peak: MissionElapsedTime::<I>::new(peak).to_utc(),
         events: lc_events,
         context_bin_s: CONTEXT_BIN_S,
         context_start_s: -CONTEXT_HALF_S,
@@ -167,8 +253,8 @@ fn light_curve(events: &[Event], start: f64, stop: f64, peak: f64) -> LightCurve
     }
 }
 
-fn epoch_hour(met: f64) -> DateTime<Utc> {
-    let utc = MissionElapsedTime::<HxmtHe>::new(met).to_utc();
+fn epoch_hour<I: Instrument>(met: f64) -> DateTime<Utc> {
+    let utc = MissionElapsedTime::<I>::new(met).to_utc();
     utc.date_naive()
         .and_hms_opt(utc.hour(), 0, 0)
         .expect("valid hour")
@@ -176,24 +262,28 @@ fn epoch_hour(met: f64) -> DateTime<Utc> {
 }
 
 /// 按小时缓存 kept 事例（时间有序）。候选按时间顺序来，只留最近几个小时。
-#[derive(Default)]
-struct HourCache {
-    hours: BTreeMap<DateTime<Utc>, Option<Vec<Event>>>,
+struct HourCache<I: VetSource> {
+    hours: BTreeMap<DateTime<Utc>, Option<Vec<I::Event>>>,
     missing: Vec<DateTime<Utc>>,
 }
 
-impl HourCache {
-    fn hour(&mut self, hour: DateTime<Utc>) -> Option<&Vec<Event>> {
+impl<I: VetSource> Default for HourCache<I> {
+    fn default() -> Self {
+        Self {
+            hours: BTreeMap::new(),
+            missing: Vec::new(),
+        }
+    }
+}
+
+impl<I: VetSource> HourCache<I> {
+    fn hour(&mut self, hour: DateTime<Utc>) -> Option<&Vec<I::Event>> {
         if !self.hours.contains_key(&hour) {
             // 候选按时间排好，比当前早两小时以上的不会再用到
             let stale = hour - TimeDelta::hours(2);
             self.hours.retain(|&h, _| h >= stale);
-            let events = match EventFile::from_epoch(&hour) {
-                Ok(file) => {
-                    let mut events: Vec<Event> = file.into_iter().filter(|e| e.keep()).collect();
-                    events.sort_by_key(|e| e.time());
-                    Some(events)
-                }
+            let events = match I::hour_events(&hour) {
+                Ok(events) => Some(events),
                 Err(error) => {
                     eprintln!("vet: hour {} unavailable: {error}", hour.format("%Y-%m-%dT%H"));
                     self.missing.push(hour);
@@ -206,10 +296,10 @@ impl HourCache {
     }
 
     /// [lo, hi)（MET）内的事例，跨小时拼接；相邻小时文件首尾可能重叠，去重。
-    fn events(&mut self, lo: f64, hi: f64) -> Vec<Event> {
-        let mut out: Vec<Event> = Vec::new();
-        let mut hour = epoch_hour(lo);
-        let last = epoch_hour(hi);
+    fn events(&mut self, lo: f64, hi: f64) -> Vec<I::Event> {
+        let mut out: Vec<I::Event> = Vec::new();
+        let mut hour = epoch_hour::<I>(lo);
+        let last = epoch_hour::<I>(hi);
         while hour <= last {
             if let Some(events) = self.hour(hour) {
                 let a = events.partition_point(|e| e.time().met() < lo);
@@ -220,28 +310,33 @@ impl HourCache {
         }
         out.sort_by_key(|e| e.time());
         out.dedup_by(|a, b| {
-            a.time() == b.time() && a.detector.id == b.detector.id && a.channel() == b.channel()
+            a.time() == b.time() && I::unit(a) == I::unit(b) && I::lc_channel(a) == I::lc_channel(b)
         });
         out
     }
 }
 
 /// 一个候选所需的事例：判据范围与光变曲线范围的并集
-fn load(cache: &mut HourCache, start: f64, stop: f64, config: &ExtendedEmissionConfig) -> Vec<Event> {
+fn load<I: VetSource>(
+    cache: &mut HourCache<I>,
+    start: f64,
+    stop: f64,
+    config: &ExtendedEmissionConfig,
+) -> Vec<I::Event> {
     let (lo, hi) = config.span();
     let lo = (start + lo).min(start - CONTEXT_HALF_S).min(start - LC_PAD_S);
     let hi = (start + hi).max(start + CONTEXT_HALF_S).max(stop + LC_PAD_S);
     cache.events(lo, hi)
 }
 
-fn utc_to_met(utc: DateTime<Utc>) -> f64 {
-    MissionElapsedTime::<HxmtHe>::from(utc).met()
+fn utc_to_met<I: Instrument>(utc: DateTime<Utc>) -> f64 {
+    MissionElapsedTime::<I>::from(utc).met()
 }
 
-fn day_dir(day: NaiveDate) -> PathBuf {
+fn day_dir<I: Instrument>(day: NaiveDate) -> PathBuf {
     PathBuf::from(format!(
         "data/{}/{:04}/{:02}",
-        HxmtHe::name().replace('/', "_"),
+        I::name().replace('/', "_"),
         day.year(),
         day.month()
     ))
@@ -263,15 +358,15 @@ struct Totals {
 }
 
 /// 复核一天，计数记进 `totals`。没有 signals 文件或输出已是最新时不写。
-fn vet_day(
+fn vet_day<I: VetSource>(
     day: NaiveDate,
     max_fa: f64,
     force: bool,
     config: &ExtendedEmissionConfig,
-    cache: &mut HourCache,
+    cache: &mut HourCache<I>,
     totals: &mut Totals,
 ) {
-    let dir = day_dir(day);
+    let dir = day_dir::<I>(day);
     let stem = day.format("%Y%m%d").to_string();
     let signals_path = dir.join(format!("{stem}_signals.json"));
     let vet_path = dir.join(format!("{stem}_vet.json"));
@@ -288,13 +383,13 @@ fn vet_day(
     selected.sort_by_key(|s| s.start);
 
     if !force && let Some(vetted) = modified(&vet_path) {
-        // 输出须不旧于候选表与所用的每个 1K 小时文件（数据重发会更新它们）
+        // 输出须不旧于候选表与所用的每个小时数据文件（数据重发会更新它们）
         let mut sources = vec![modified(&signals_path)];
         for s in &selected {
-            let met = utc_to_met(s.start);
+            let met = utc_to_met::<I>(s.start);
             for dh in [-1, 0, 1] {
-                let hour = epoch_hour(met) + TimeDelta::hours(dh);
-                sources.push(EventFile::last_modified(&hour).ok());
+                let hour = epoch_hour::<I>(met) + TimeDelta::hours(dh);
+                sources.push(I::hour_modified(&hour));
             }
         }
         if sources.into_iter().flatten().all(|t| t <= vetted) {
@@ -305,15 +400,15 @@ fn vet_day(
 
     let mut out = Vec::with_capacity(selected.len());
     for signal in selected {
-        let start = utc_to_met(signal.start);
-        let stop = utc_to_met(signal.stop);
-        let peak = utc_to_met(signal.peak_time());
+        let start = utc_to_met::<I>(signal.start);
+        let stop = utc_to_met::<I>(signal.stop);
+        let peak = utc_to_met::<I>(signal.peak_time());
         let events = load(cache, start, stop, config);
-        let v = verdict(&events, start, stop, config);
+        let v = verdict::<I>(&events, start, stop, config);
         totals.candidates += 1;
         totals.no_z += v.grb.z.is_none() as usize;
         totals.grb += v.grb.flagged as usize;
-        totals.beams += v.beam.flagged as usize;
+        totals.beams += v.beam.as_ref().is_some_and(|b| b.flagged) as usize;
         out.push(Vet {
             start: signal.start,
             stop: signal.stop,
@@ -321,9 +416,9 @@ fn vet_day(
             false_positive_per_year: signal.false_positive_per_year,
             grb: v.grb,
             det_share_max: v.det_share_max,
-            acd: Some(v.acd),
-            electron_beam: Some(v.beam),
-            light_curve: Some(light_curve(&events, start, stop, peak)),
+            acd: v.acd,
+            electron_beam: v.beam,
+            light_curve: Some(light_curve::<I>(&events, start, stop, peak)),
         });
     }
 
@@ -334,7 +429,7 @@ fn vet_day(
     totals.days += 1;
 }
 
-pub fn cmd_vet_days(
+pub fn cmd_vet_days<I: VetSource>(
     from: NaiveDate,
     to: NaiveDate,
     workers: usize,
@@ -343,18 +438,19 @@ pub fn cmd_vet_days(
     force: bool,
 ) {
     let config = ExtendedEmissionConfig::default();
-    let mut cache = HourCache::default();
+    let mut cache = HourCache::<I>::default();
     let mut totals = Totals::default();
     for (i, day) in from.iter_days().take_while(|d| *d <= to).enumerate() {
         if i % workers == worker {
-            vet_day(day, max_fa, force, &config, &mut cache, &mut totals);
+            vet_day::<I>(day, max_fa, force, &config, &mut cache, &mut totals);
         }
     }
     eprintln!(
-        "vet {from} .. {to} (worker {worker}/{workers}, fa <= {max_fa:e}): \
+        "vet {} {from} .. {to} (worker {worker}/{workers}, fa <= {max_fa:e}): \
          {} days written, {} up to date, {} without signals; \
          {} candidates: {} without Z (background gap), {} GRB-flagged, {} electron beams; \
          {} hours unavailable",
+        I::name(),
         totals.days,
         totals.skipped_fresh,
         totals.no_signals,
@@ -366,6 +462,7 @@ pub fn cmd_vet_days(
     );
 }
 
+/// 只对 HXMT：用来与冻结的 HXMT 目录对账。
 pub fn cmd_vet_list(list: &Path, out: &Path) {
     let config = ExtendedEmissionConfig::default();
     let content = fs::read_to_string(list).expect("failed to read input csv");
@@ -395,12 +492,12 @@ pub fn cmd_vet_list(list: &Path, out: &Path) {
     // 按时间顺序处理，小时缓存才有效；输出保持输入行序
     let mut order: Vec<usize> = (0..rows.len()).filter(|&i| rows[i].1.is_some()).collect();
     order.sort_by(|&a, &b| rows[a].1.unwrap().0.total_cmp(&rows[b].1.unwrap().0));
-    let mut cache = HourCache::default();
+    let mut cache = HourCache::<HxmtHe>::default();
     let mut verdicts: Vec<Option<Verdict>> = (0..rows.len()).map(|_| None).collect();
     for (k, &i) in order.iter().enumerate() {
         let (start, stop) = rows[i].1.unwrap();
         let events = load(&mut cache, start, stop, &config);
-        verdicts[i] = Some(verdict(&events, start, stop, &config));
+        verdicts[i] = Some(verdict::<HxmtHe>(&events, start, stop, &config));
         if (k + 1) % 500 == 0 {
             eprintln!("vet: {}/{} rows", k + 1, order.len());
         }
@@ -418,7 +515,8 @@ pub fn cmd_vet_list(list: &Path, out: &Path) {
         match v {
             Some(v) => {
                 n_grb += v.grb.flagged as usize;
-                n_beam += v.beam.flagged as usize;
+                let beam = v.beam.as_ref().expect("HXMT has ACD");
+                n_beam += beam.flagged as usize;
                 n_no_z += v.grb.z.is_none() as usize;
                 output.push_str(&format!(
                     ",{},{},{:.3},{:.3},{},{},{},{:.3e},{},{:.3}\n",
@@ -427,10 +525,10 @@ pub fn cmd_vet_list(list: &Path, out: &Path) {
                     v.grb.expected,
                     v.grb.max_group_share,
                     v.grb.flagged as u8,
-                    v.beam.top_only,
-                    v.beam.side_only,
-                    v.beam.p,
-                    v.beam.flagged as u8,
+                    beam.top_only,
+                    beam.side_only,
+                    beam.p,
+                    beam.flagged as u8,
                     v.det_share_max,
                 ));
             }
@@ -457,7 +555,7 @@ pub fn cmd_vet_list(list: &Path, out: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use blink_hxmt_he::types::{Detector, Scintillator};
+    use blink_hxmt_he::types::{Detector, Event, Scintillator};
 
     fn event(met: f64, det: u8, acds: &[usize]) -> Event {
         let mut bits = [false; 18];
@@ -498,11 +596,11 @@ mod tests {
         }));
         let events = sorted(events);
         let stop = start + 29e-5;
-        let v = verdict(&events, start, stop, &Default::default());
+        let v = verdict::<HxmtHe>(&events, start, stop, &Default::default());
         assert!(v.grb.z.is_some() && !v.grb.flagged);
-        assert!(!v.beam.flagged);
+        assert!(!v.beam.as_ref().unwrap().flagged);
         assert!(v.det_share_max < 0.2);
-        let lc = light_curve(&events, start, stop, start + 15e-5);
+        let lc = light_curve::<HxmtHe>(&events, start, stop, start + 15e-5);
         // 窗内 30 个 + 本底；时间相对峰值
         assert!(lc.events.len() >= 30);
         assert!(lc.events.iter().all(|e| e.t_us.abs() < 5.3e3));
@@ -520,10 +618,11 @@ mod tests {
             event(start + 5e-5 * i as f64, (i % 18) as u8, acds)
         }));
         let events = sorted(events);
-        let v = verdict(&events, start, start + 79.0 * 5e-5, &Default::default());
-        assert!(v.beam.flagged, "p = {}", v.beam.p);
-        assert_eq!(v.beam.top_only, 76);
-        assert_eq!(v.beam.side_only, 4);
+        let v = verdict::<HxmtHe>(&events, start, start + 79.0 * 5e-5, &Default::default());
+        let beam = v.beam.as_ref().unwrap();
+        assert!(beam.flagged, "p = {}", beam.p);
+        assert_eq!(beam.top_only, 76);
+        assert_eq!(beam.side_only, 4);
     }
 
     #[test]
@@ -533,7 +632,7 @@ mod tests {
         // 起点后 200 ms 的延展辐射，各机箱都有
         events.extend((0..2000).map(|i| event(start + 0.01 + 1e-4 * i as f64, (i % 18) as u8, &[])));
         let events = sorted(events);
-        let v = verdict(&events, start, start + 3e-4, &Default::default());
+        let v = verdict::<HxmtHe>(&events, start, start + 3e-4, &Default::default());
         assert!(v.grb.flagged);
     }
 }

@@ -70,7 +70,7 @@ pub struct ExtendedEmission {
     pub group_excess: Vec<f64>,
     /// 最大单组超出 / max(总超出, 1)，与原脚本同口径
     pub max_group_share: f64,
-    /// `z > z_threshold && max_group_share < max_group_share`
+    /// `z > z_threshold`，多组时还要 `max_group_share < max_group_share`
     pub flagged: bool,
 }
 
@@ -137,8 +137,10 @@ pub fn extended_emission<E: Event>(
         let p = poisson::sf(expected, observed).max(1e-300);
         -Normal::standard().inverse_cdf(p)
     });
+    // 单组时占比恒为 1，这条判据没有意义：分组只用来挡单组的仪器效应，
+    // 不分组的仪器（GBM 各探头朝向不同，GRB 的超出本来就不均匀）只看 Z。
     let flagged = z.is_some_and(|z| z > config.z_threshold)
-        && max_group_share < config.max_group_share;
+        && (n_groups < 2 || max_group_share < config.max_group_share);
 
     ExtendedEmission {
         observed,
@@ -163,7 +165,11 @@ mod tests {
             .collect()
     }
 
-    fn run(mut raw: Vec<(f64, usize)>, start: f64, stop: f64) -> ExtendedEmission {
+    fn run(raw: Vec<(f64, usize)>, start: f64, stop: f64) -> ExtendedEmission {
+        run_groups(raw, start, stop, 3)
+    }
+
+    fn run_groups(mut raw: Vec<(f64, usize)>, start: f64, stop: f64, n_groups: usize) -> ExtendedEmission {
         raw.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
         let events: Vec<TestEvent> = raw
             .into_iter()
@@ -172,7 +178,7 @@ mod tests {
                 group: group as u8,
             })
             .collect();
-        extended_emission(&events, start, stop, 3, |e| e.group as usize, &Default::default())
+        extended_emission(&events, start, stop, n_groups, |e| e.group as usize, &Default::default())
     }
 
     #[test]
@@ -207,6 +213,20 @@ mod tests {
         let result = run(raw, 0.0, 3e-4);
         assert!(result.z.unwrap() > 5.0);
         assert!(result.max_group_share > 0.95);
+        assert!(!result.flagged);
+    }
+
+    #[test]
+    fn one_group_is_judged_by_z_alone() {
+        // 不分组：占比恒为 1，超出够大就判
+        let mut raw = uniform(-3.0, 3.0, 1e4, 1);
+        raw.extend(uniform(0.01, 0.21, 1e4, 1));
+        let result = run_groups(raw, 0.0, 3e-4, 1);
+        assert!(result.z.unwrap() > 5.0);
+        assert!(result.max_group_share > 0.95);
+        assert!(result.flagged);
+        // 平本底仍不判
+        let result = run_groups(uniform(-3.0, 3.0, 1e4, 1), 0.0, 3e-4, 1);
         assert!(!result.flagged);
     }
 

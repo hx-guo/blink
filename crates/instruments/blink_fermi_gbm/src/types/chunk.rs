@@ -1,5 +1,7 @@
 use blink_core::error::Error;
-use blink_core::types::{Coverage, ExclusionReason, MissionElapsedTime};
+use blink_core::types::{
+    Coverage, ExclusionReason, ExposureSample, MissionElapsedTime, Position, Trajectory,
+};
 use chrono::prelude::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -147,6 +149,27 @@ impl blink_core::traits::Chunk for Chunk {
             diagnostics.push(("events_outside_gti", outside as f64));
         }
         diagnostics
+    }
+
+    /// 曝光与搜索同一口径：各探头 GTI 的并集（`gti_union`），每 `step` 秒一点，
+    /// 星下点从 poshist 插值。
+    fn exposure_samples(&self, step: f64) -> Option<Vec<ExposureSample>> {
+        let positions = Trajectory::<MissionElapsedTime<FermiGbm>, Position>::from(&self.poshist);
+        let mut samples = Vec::new();
+        for [a, b] in self.gti_union() {
+            let mut t = a;
+            while t < b {
+                // 每个采样点代表 [t, t + step) 与段的交集
+                let seconds = (b - t).min(step);
+                let met = t + seconds / 2.0;
+                let position = positions
+                    .interpolate(MissionElapsedTime::new(met))
+                    .map(|p| p.state);
+                samples.push(ExposureSample { met, seconds, position });
+                t += step;
+            }
+        }
+        Some(samples)
     }
 
     fn last_modified(epoch: &DateTime<Utc>) -> Result<DateTime<Utc>, Error> {

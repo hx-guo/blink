@@ -338,7 +338,9 @@ pub fn cmd_catalog_pipeline<I: Instrument>(
     fs::write(out_dir.join("rejected.csv"), rejected_rows).expect("failed to write rejected.csv");
 
     let n_train = n_significant - n_after_train;
-    let manifest = serde_json::json!({
+    // 电子束检验只在有 ACD 的仪器上做（vet 给出 electron_beam）
+    let has_beam_test = vets.values().any(|v| v.electron_beam.is_some());
+    let mut manifest = serde_json::json!({
         "instrument": I::name(),
         "slug": slug,
         "generated_at": time_string(&Utc::now()),
@@ -360,10 +362,9 @@ pub fn cmd_catalog_pipeline<I: Instrument>(
             "train_threshold": threshold,
             "train_threshold_fixed": fixed_train_threshold.is_some(),
             "missing_data_settle_days": settle_days,
-            "grb_rule": "Z > 5 in [-0.1, +0.3) s outside the candidate, largest box share < 0.6",
+            "grb_rule": "Z > 5 in [-0.1, +0.3) s outside the candidate; with several detector groups \
+                         (HXMT/HE: boxes), largest group share < 0.6",
             "grb_same_burst_s": SAME_BURST_S,
-            "electron_beam_p": BEAM_P_THRESHOLD,
-            "electron_beam_top_share_reference": TOP_SHARE_REFERENCE,
         },
         "counts": {
             "pool": n_pool,
@@ -378,6 +379,10 @@ pub fn cmd_catalog_pipeline<I: Instrument>(
             "electron_beams": n_beams,
         },
     });
+    if has_beam_test {
+        manifest["selection"]["electron_beam_p"] = serde_json::json!(BEAM_P_THRESHOLD);
+        manifest["selection"]["electron_beam_top_share_reference"] = serde_json::json!(TOP_SHARE_REFERENCE);
+    }
     let exposure = serde_json::json!({
         "instrument": I::name(),
         "live_seconds": live_seconds,

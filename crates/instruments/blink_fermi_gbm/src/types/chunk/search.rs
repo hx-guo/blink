@@ -106,52 +106,63 @@ fn detector_counts(
     }
 }
 
-pub(super) fn search(chunk: &Chunk) -> Vec<Signal<Event>> {
-    // NaI 与 BGO 分组搜索：两者的响应差得太远，合成一路等于拿 BGO 的信号去
-    // 配 NaI 的本底。`group_number` 取本小时实际到齐的类型数，这样只有 BGO
-    // 的年份自动退回单组、不必付分组的试验次数惩罚。
-    // 先按事例总数把容量要够：十几路加起来一小时有三千多万条，从零翻倍
-    // 增长要重新分配二十几次、白搬约 1 GB。keep 之后只会更少，不会更多。
-    let mut events: Vec<Event> =
-        Vec::with_capacity(chunk.tte_files.iter().map(|file| file.len()).sum());
-    for file in &chunk.tte_files {
-        let group = chunk
-            .groups
-            .iter()
-            .position(|detector| *detector == file.detector)
-            .expect("每个 TTE 的类型都在 groups 里") as u8;
-        events.extend(
-            file.time()
+impl Chunk {
+    /// 本小时搜索所用的事例，按时间排序：准入（`keep`）、裁到本小时、落在各探头
+    /// GTI 并集之内。第二个返回值是本小时内落在 GTI 之外而丢掉的事例数。
+    /// 搜索与复核（`blink vet`）都从这里取，两边看到的是同一批事例。
+    pub fn events_in_gti(&self) -> (Vec<Event>, usize) {
+        // NaI 与 BGO 分组搜索：两者的响应差得太远，合成一路等于拿 BGO 的信号去
+        // 配 NaI 的本底。`group_number` 取本小时实际到齐的类型数，这样只有 BGO
+        // 的年份自动退回单组、不必付分组的试验次数惩罚。
+        // 先按事例总数把容量要够：十几路加起来一小时有三千多万条，从零翻倍
+        // 增长要重新分配二十几次、白搬约 1 GB。keep 之后只会更少，不会更多。
+        let mut events: Vec<Event> =
+            Vec::with_capacity(self.tte_files.iter().map(|file| file.len()).sum());
+        for file in &self.tte_files {
+            let group = self
+                .groups
                 .iter()
-                .zip(file.pha().iter())
-                .map(|(time, channel)| Event {
-                    time: MissionElapsedTime::new(*time),
-                    channel: *channel,
-                    detector: file.detector,
-                    unit: file.unit,
-                    group,
-                })
-                .filter(Event::keep),
-        );
-    }
-    // 十几路事例流拼起来必然是乱的，而 search_new 假定输入按时间有序。
-    events.sort();
+                .position(|detector| *detector == file.detector)
+                .expect("每个 TTE 的类型都在 groups 里") as u8;
+            events.extend(
+                file.time()
+                    .iter()
+                    .zip(file.pha().iter())
+                    .map(|(time, channel)| Event {
+                        time: MissionElapsedTime::new(*time),
+                        channel: *channel,
+                        detector: file.detector,
+                        unit: file.unit,
+                        group,
+                    })
+                    .filter(Event::keep),
+            );
+        }
+        // 十几路事例流拼起来必然是乱的，而 search_new 假定输入按时间有序。
+        events.sort();
 
-    // 逐小时文件带着整点前 120 s 的事例（TSTART = 整点 − 120 s，上一小时的文件到
-    // 整点为止、不重叠），先按本小时裁掉——那一截归上一小时的 chunk 管，不是丢数据，
-    // 不单独记账。再按各探头 GTI 的并集过滤并把它当活时间：GTI 在 SAA 进入处截止，
-    // 之后到下一文件之前是死区，本底窗不能伸进去（见 `Chunk::gti_union`）。
-    let (start, stop) = (chunk.span[0].met(), chunk.span[1].met());
-    events.retain(|e| {
-        let t = e.time().met();
-        t >= start && t <= stop
-    });
-    let gti_seconds = chunk.gti_union();
-    let inside = |t: f64| gti_seconds.iter().any(|g| t >= g[0] && t <= g[1]);
-    let before = events.len();
-    events.retain(|e| inside(e.time().met()));
-    let n_outside = before - events.len();
-    let gti: Vec<[MissionElapsedTime<FermiGbm>; 2]> = gti_seconds
+        // 逐小时文件带着整点前 120 s 的事例（TSTART = 整点 − 120 s，上一小时的文件到
+        // 整点为止、不重叠），先按本小时裁掉——那一截归上一小时的 chunk 管，不是丢数据，
+        // 不单独记账。再按各探头 GTI 的并集过滤并把它当活时间：GTI 在 SAA 进入处截止，
+        // 之后到下一文件之前是死区，本底窗不能伸进去（见 `Chunk::gti_union`）。
+        let (start, stop) = (self.span[0].met(), self.span[1].met());
+        events.retain(|e| {
+            let t = e.time().met();
+            t >= start && t <= stop
+        });
+        let gti_seconds = self.gti_union();
+        let inside = |t: f64| gti_seconds.iter().any(|g| t >= g[0] && t <= g[1]);
+        let before = events.len();
+        events.retain(|e| inside(e.time().met()));
+        let n_outside = before - events.len();
+        (events, n_outside)
+    }
+}
+
+pub(super) fn search(chunk: &Chunk) -> Vec<Signal<Event>> {
+    let (events, n_outside) = chunk.events_in_gti();
+    let gti: Vec<[MissionElapsedTime<FermiGbm>; 2]> = chunk
+        .gti_union()
         .iter()
         .map(|g| [MissionElapsedTime::new(g[0]), MissionElapsedTime::new(g[1])])
         .collect();

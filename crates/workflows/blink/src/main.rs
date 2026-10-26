@@ -244,11 +244,11 @@ fn main() {
             worker,
             instrument,
         } => {
-            assert!(
-                instrument == Instrument::HxmtHe,
-                "vet: only hxmt-he is implemented, got {instrument:?}"
-            );
             if let Some(list) = list {
+                assert!(
+                    instrument == Instrument::HxmtHe,
+                    "vet --list: only hxmt-he, got {instrument:?}"
+                );
                 let out = out.expect("--list requires -o");
                 commands::vet::cmd_vet_list(&list, &out);
             } else {
@@ -258,7 +258,12 @@ fn main() {
                 };
                 let (from, to) = (parse(&from.unwrap()), parse(&to.unwrap()));
                 assert!(workers >= 1 && worker < workers, "--worker out of range");
-                commands::vet::cmd_vet_days(from, to, workers, worker, max_fa, force);
+                use commands::vet::cmd_vet_days as run;
+                match instrument {
+                    Instrument::HxmtHe => run::<blink_hxmt_he::types::HxmtHe>(from, to, workers, worker, max_fa, force),
+                    Instrument::FermiGbm => run::<blink_fermi_gbm::types::FermiGbm>(from, to, workers, worker, max_fa, force),
+                    other => panic!("vet: not implemented for {other:?} (hxmt-he, fermi-gbm)"),
+                }
             }
         }
         TopCommands::Export {
