@@ -32,7 +32,7 @@ pub struct PosHistFile {
 
 impl PosHistFile {
     pub fn from_fits_file(path: &str) -> Result<Self, fitsio_pure::compat::errors::Error> {
-        let fptr = fitsio_pure::compat::fitsfile::FitsFile::open(path)?;
+        let fptr = crate::io::file::open_fits(path)?;
         let hdu = fptr.hdu(1)?;
 
         let time = hdu.read_col::<f64>(&fptr, "SCLK_UTC")?;

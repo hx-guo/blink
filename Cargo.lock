@@ -139,6 +139,7 @@ dependencies = [
  "blink_core",
  "chrono",
  "fitsio-pure",
+ "miniz_oxide",
  "serde",
  "uom",
 ]

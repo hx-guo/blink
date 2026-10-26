@@ -27,7 +27,7 @@ impl TteFile {
         detector: Detector,
         unit: u8,
     ) -> Result<Self, fitsio_pure::compat::errors::Error> {
-        let fptr = fitsio_pure::compat::fitsfile::FitsFile::open(path)?;
+        let fptr = crate::io::file::open_fits(path)?;
 
         let events = fptr.hdu("EVENTS")?;
         let time = events.read_col::<f64>(&fptr, "TIME")?;
