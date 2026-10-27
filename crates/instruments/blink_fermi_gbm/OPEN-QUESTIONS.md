@@ -1026,7 +1026,19 @@ HXMT 实测本底抽稀 20 倍半宽只从 0.0770 动到 0.0760，据此立了 0
 （`glg_tte_b0_130801_00z_v00.fit.gz` 余 447287 字节）。gzip(1) 与 cfitsio 忽略它，fitsio-pure
 当作下一个成员解、报 invalid gzip header，183 天 3865 小时被记成 `corrupt_data`。已改：
 `io::file::open_fits` 逐成员解、遇非 gzip 即停，各成员照样验 CRC-32 与长度。其余 1117 天的
-4468 个产物文件与改前逐字节相同。其他仪器的读取器仍直接用 fitsio-pure 打开。
+4468 个产物文件与改前逐字节相同。
+
+查清了（2026-10-27，`/scratchfs2/gecam/guohx/gztail`）：这 3865 小时的 7730 个 BGO 文件逐个全解，
+6245 个是"完整的流 + 它自己最后一段的重复"（重复段 15671 字节到 11.8 MB，下载续传时末段写了
+两遍），1468 个完好（同一小时另一路坏），17 个真坏（16 个截断、1 个 deflate 数据损坏，都是
+2021-01 写入的），没有别的形态。所以不是 Fermi 的产品问题，也不是 fitsio-pure 的 bug：它到
+0.22.0 都有意把尾部非零字节当错误（自带 `trailing_garbage_is_an_error` 测试）。各家对照
+（同一小 FITS 的 9 种 gzip 封装）：gzip(1) 对重复段/垃圾报警告照解；cfitsio 4.6.0 只解第一个
+成员，后面一概不看，合法的多成员文件反而读不全；astropy 8.0.1 对 CRC 错不报错；Python gzip 与
+fitsio-pure 一样严格。`open_fits` 的行为与 gzip(1) 相同。截去重复段后原版 fitsio-pure 读出的
+结果与 `open_fits` 相同，解压字节 sha256 一致。17 个坏文件照旧记 `corrupt_data`，需重新下载。
+其他仪器（HXMT 1K/1B、GECAM、GRM、GRID）的输入目录共约 550 万个文件，没有一个 .gz，读取器
+碰不到 gzip。
 
 运行 `/scratchfs2/gecam/guohx/gbm2016`（只有 2 路 BGO 的连续 TTE），1300 天、活时间 3.09 年：
 池 12406 → fa ≤ 1e-5 2242 → 列车 19（GRB 130427A 期间，按池定阈 = 34）→ GRB 4 → 目录 2219

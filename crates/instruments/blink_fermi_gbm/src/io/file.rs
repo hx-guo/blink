@@ -22,9 +22,9 @@
 //! 所以查找一个探头时按上面的顺序逐个目录试，取版本号最大的那个文件。
 
 use chrono::prelude::*;
-use std::path::PathBuf;
 use fitsio_pure::compat::errors::Error;
 use fitsio_pure::compat::fitsfile::FitsFile;
+use std::path::PathBuf;
 use std::{env, fs, sync::LazyLock};
 
 static ROOT: LazyLock<String> = LazyLock::new(|| {
@@ -85,12 +85,14 @@ pub fn find_poshist(time: &DateTime<Utc>) -> Option<PathBuf> {
 
 /// 打开 GBM 归档里的 FITS 文件（多为 `.fit.gz`）。
 ///
-/// 镜像里有一批 gzip 文件在数据流之后还带着几百 kB 的尾部垃圾：2013-07 起的 BGO
-/// 逐小时 TTE，如 `glg_tte_b0_130801_00z_v00.fit.gz` 解完第一个成员（83128320 字节，
-/// 恰为 2880 的整数倍）后还剩 447287 字节。gzip(1) 报 "trailing garbage ignored" 照常
-/// 解出，cfitsio 也读得了；fitsio-pure 却把它当下一个成员去解，报 invalid gzip header，
-/// 这些小时整小时被记成 corrupt_data。这里逐个成员解压，后面不是 gzip 成员就停，与
-/// gzip(1) 一致；每个成员照样校验 CRC-32 与长度，所以截断或损坏仍然报错。
+/// 镜像里有一批 gzip 文件在完整的数据流之后，又重复了一遍这个流自己的最后一段：2013-07
+/// 起的 BGO 逐小时 TTE，如 `glg_tte_b0_130801_00z_v00.fit.gz` 的第一个成员占 43584816
+/// 字节，其后的 447287 字节与成员末尾 447287 字节逐字节相同（下载续传时末段写了两遍）。
+/// 2012-11..2016-07 共 6245 个文件如此，重复段 16 kB 到 12 MB。gzip(1) 报 "trailing
+/// garbage ignored" 照常解出，cfitsio 只解第一个成员也读得了；fitsio-pure（到 0.22.0）
+/// 把它当下一个成员去解，报 invalid gzip header，这些小时整小时被记成 corrupt_data。
+/// 这里逐个成员解压，后面不是 gzip 成员就停，与 gzip(1) 一致；每个成员照样校验 CRC-32
+/// 与长度，所以截断或损坏仍然报错。
 pub fn open_fits(path: &str) -> Result<FitsFile, Error> {
     let data = fs::read(path)?;
     if !fitsio_pure::gzip::is_gzip(&data) {
@@ -126,7 +128,11 @@ fn gunzip_member(data: &[u8], out: &mut Vec<u8>) -> Result<usize, &'static str> 
     for bit in [0x08, 0x10] {
         // FNAME、FCOMMENT：以 0 结尾的字符串
         if flags & bit != 0 {
-            pos += data.get(pos..).and_then(|d| d.iter().position(|&b| b == 0)).ok_or("truncated header")? + 1;
+            pos += data
+                .get(pos..)
+                .and_then(|d| d.iter().position(|&b| b == 0))
+                .ok_or("truncated header")?
+                + 1;
         }
     }
     if flags & 0x02 != 0 {
@@ -176,15 +182,19 @@ fn crc32(data: &[u8]) -> u32 {
         for (i, slot) in table.iter_mut().enumerate() {
             let mut c = i as u32;
             for _ in 0..8 {
-                c = if c & 1 != 0 { 0xEDB8_8320 ^ (c >> 1) } else { c >> 1 };
+                c = if c & 1 != 0 {
+                    0xEDB8_8320 ^ (c >> 1)
+                } else {
+                    c >> 1
+                };
             }
             *slot = c;
         }
         table
     });
-    !data
-        .iter()
-        .fold(!0u32, |c, &b| TABLE[((c ^ b as u32) & 0xFF) as usize] ^ (c >> 8))
+    !data.iter().fold(!0u32, |c, &b| {
+        TABLE[((c ^ b as u32) & 0xFF) as usize] ^ (c >> 8)
+    })
 }
 
 #[cfg(test)]
@@ -258,6 +268,39 @@ mod tests {
         junk.extend([0xf1, 0xe9, 0x71, 0xe4]);
         assert_eq!(gunzip_member(&junk, &mut Vec::new()).unwrap(), n);
         assert!(!fitsio_pure::gzip::is_gzip(&junk[n..]));
+    }
+
+    /// 镜像的实际情形：完整的流后面重复了它自己的最后一段。整条 open_fits 读得出，
+    /// 内容与没有重复段时相同。
+    #[test]
+    fn a_stream_followed_by_a_copy_of_its_own_tail_opens() {
+        let mut header = String::new();
+        for card in [
+            "SIMPLE  =                    T",
+            "BITPIX  =                    8",
+            "NAXIS   =                    0",
+            "END",
+        ] {
+            header.push_str(&format!("{card:<80}"));
+        }
+        let fits = format!("{header:<2880}").into_bytes();
+        let clean = gzip(&fits);
+        let mut dup = clean.clone();
+        dup.extend_from_slice(&clean[clean.len() - 20..]);
+        let dir = std::env::temp_dir().join(format!("blink_gbm_duptail_{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let (a, b) = (dir.join("clean.fit.gz"), dir.join("dup.fit.gz"));
+        fs::write(&a, &clean).unwrap();
+        fs::write(&b, &dup).unwrap();
+        assert!(FitsFile::open(b.to_str().unwrap()).is_err());
+        let (fa, fb) = (
+            open_fits(a.to_str().unwrap()).unwrap(),
+            open_fits(b.to_str().unwrap()).unwrap(),
+        );
+        let key = |f: &FitsFile| f.hdu(0).unwrap().read_key::<i64>(f, "BITPIX").unwrap();
+        assert_eq!(key(&fa), 8);
+        assert_eq!(key(&fb), 8);
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
