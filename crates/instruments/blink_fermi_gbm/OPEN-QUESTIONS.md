@@ -1040,6 +1040,11 @@ fitsio-pure 一样严格。`open_fits` 的行为与 gzip(1) 相同。截去重�
 其他仪器（HXMT 1K/1B、GECAM、GRM、GRID）的输入目录共约 550 万个文件，没有一个 .gz，读取器
 碰不到 gzip。
 
+镜像文件属主 hxmtdata、644，我们截不了。截重复段的脚本与清单在 `gztail/fix_dup_tail.py`、
+`gztail/dup.txt`（先全解验 CRC、确认是末段重复才截，截后再验，保留 mtime；默认只演练，
+`--apply` 才动），只读演练 6245 个全为可截、共 6.7 GB，留给维护者跑。不另存截好的副本：
+`open_fits` 已读得对，结果与截后相同。
+
 运行 `/scratchfs2/gecam/guohx/gbm2016`（只有 2 路 BGO 的连续 TTE），1300 天、活时间 3.09 年：
 池 12406 → fa ≤ 1e-5 2242 → 列车 19（GRB 130427A 期间，按池定阈 = 34）→ GRB 4 → 目录 2219
 （final 2215）。对第二版目录（有搜索时长的天上 2754 个）：BGO 计数 ≥ 20 的找回 89.5%
