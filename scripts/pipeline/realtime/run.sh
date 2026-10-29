@@ -83,7 +83,8 @@ if [[ -n "${DEPLOY:-}" ]]; then
   echo "deployed to $DEPLOY"
 fi
 
-# keep the last KEEP_DAYS of catalogs and exports (the served export is always the newest)
-find "$RUN_DIR/catalogs/$SLUG" "$RUN_DIR/web" -mindepth 1 -maxdepth 1 -type d -mtime "+$KEEP_DAYS" -exec rm -rf {} +
+# keep the last KEEP_DAYS of catalogs; of the exports (thousands of files each) only the served one
+find "$RUN_DIR/catalogs/$SLUG" -mindepth 1 -maxdepth 1 -type d -mtime "+$KEEP_DAYS" -exec rm -rf {} +
+find "$RUN_DIR/web" -mindepth 1 -maxdepth 1 -type d ! -path "$EXPORT" -exec rm -rf {} +
 find "$RUN_DIR/logs" -name '*.log' -mtime "+$KEEP_DAYS" -delete
 echo "== done $STAMP"

@@ -12,7 +12,7 @@ DEPLOY_SSH="ssh -o BatchMode=yes"             # rsync -e; BatchMode: fail instea
 INSTRUMENT=hxmt-he                            # --instrument of blink
 SLUG=Insight-HXMT_HE                          # directory name of the instrument under data/
 DAYS_BACK=3                                   # days searched again on every run (late and re-sent data)
-KEEP_DAYS=14                                  # catalog directories of older runs are deleted
+KEEP_DAYS=14                                  # catalog directories and logs of older runs are deleted
 # Command that receives a report on stdin when names are held for review or a run fails; empty: log only
 NOTIFY=""                                     # e.g. 'mail -s "TGF pipeline" someone@example.org'
 # Extra flags of `blink name`; only for tests (e.g. --allow-dirty). Leave empty in production.
