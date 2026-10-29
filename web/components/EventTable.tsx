@@ -42,8 +42,8 @@ function Sci({ x }: { x: number }) {
   return (
     <>
       {m.toFixed(1)}
-      <span className="muted"> × 10</span>
-      <sup style={{ display: "inline-block", minWidth: "2.2em", textAlign: "left" }}>{e}</sup>
+      <span className="secondary"> × 10</span>
+      <sup style={{ display: "inline-block", minWidth: "2em", textAlign: "left", fontSize: "0.72em" }}>{e}</sup>
     </>
   );
 }
@@ -116,7 +116,7 @@ export default function EventTable({ events, caption, showDetector = true }: { e
             {shown.map((e) => (
               <tr key={e.key}>
                 <td>
-                  <Link href={eventHref({ name: e.name, cand_id: e.cand })} className="serif" style={{ fontWeight: 600, fontSize: 15 }}>
+                  <Link href={eventHref({ name: e.name, cand_id: e.cand })} style={{ fontSize: 16 }}>
                     {e.name ? `TGF ${e.name}` : "pending"}
                   </Link>
                   {e.provisional && <span className="badge ml-2">provisional</span>}
@@ -137,7 +137,7 @@ export default function EventTable({ events, caption, showDetector = true }: { e
         </table>
       </div>
       <div className="flex items-center justify-between gap-3 flex-wrap text-sm">
-        <span className="secondary tabular">
+        <span className="caption tabular">
           {sorted.length ? `${(page * size + 1).toLocaleString("en")}–${Math.min(sorted.length, (page + 1) * size).toLocaleString("en")}` : "0"} of{" "}
           {sorted.length.toLocaleString("en")}
         </span>
@@ -158,7 +158,7 @@ export default function EventTable({ events, caption, showDetector = true }: { e
           <select className="control" value={size} onChange={(e) => setSize(Number(e.target.value))} aria-label="Rows per page">
             {[20, 50, 100].map((s) => <option key={s} value={s}>{s} per page</option>)}
           </select>
-          <button className="control" onClick={download}>Download JSON</button>
+          <button className="link-btn" onClick={download}>Download JSON</button>
         </span>
       </div>
     </div>

@@ -105,31 +105,31 @@ export default function RangeBrush({
         return (
           <rect
             key={k}
-            x={k * binW + 0.75}
+            x={k * binW + binW * 0.18}
             y={PLOT_H - h}
-            width={Math.max(0.5, binW - 1.5)}
+            width={Math.max(0.5, binW * 0.64)}
             height={h}
-            fill="var(--accent)"
-            opacity={inSel(k) ? 0.85 : 0.18}
+            fill={shown && inSel(k) ? "var(--accent)" : "var(--ink)"}
+            opacity={shown ? (inSel(k) ? 0.9 : 0.25) : 0.7}
           >
             <title>{`${c} TGFs, ${tick(inv(lo + (k * (hi - lo)) / bins))} – ${tick(inv(lo + ((k + 1) * (hi - lo)) / bins))}`}</title>
           </rect>
         );
       })}
-      <line x1={0} x2={W} y1={PLOT_H + 0.5} y2={PLOT_H + 0.5} stroke="var(--axis)" />
+      <line x1={0} x2={W} y1={PLOT_H + 0.5} y2={PLOT_H + 0.5} stroke="var(--border-strong)" strokeWidth={0.75} />
       {ticks.map((u) => (
         <g key={u}>
-          <line x1={x(u)} x2={x(u)} y1={PLOT_H} y2={PLOT_H + 4} stroke="var(--axis)" />
-          <text x={x(u)} y={PLOT_H + 17} textAnchor="middle" fontSize={11} fill="var(--text-secondary)" className="tabular">
+          <line x1={x(u)} x2={x(u)} y1={PLOT_H} y2={PLOT_H + 4} stroke="var(--border-strong)" strokeWidth={0.75} />
+          <text x={x(u)} y={PLOT_H + 17} textAnchor="middle" fontSize={11.5} fill="var(--text-secondary)" className="tabular">
             {tick(inv(u))}
           </text>
         </g>
       ))}
       {shown && (
         <g pointerEvents="none">
-          <rect x={x(shown[0])} y={0} width={Math.max(1.5, x(shown[1]) - x(shown[0]))} height={PLOT_H} fill="var(--accent)" opacity={0.08} />
-          <line x1={x(shown[0])} x2={x(shown[0])} y1={0} y2={PLOT_H + 4} stroke="var(--accent-strong)" strokeWidth={1.5} />
-          <line x1={x(shown[1])} x2={x(shown[1])} y1={0} y2={PLOT_H + 4} stroke="var(--accent-strong)" strokeWidth={1.5} />
+          <rect x={x(shown[0])} y={0} width={Math.max(1, x(shown[1]) - x(shown[0]))} height={PLOT_H} fill="var(--accent-soft)" />
+          <line x1={x(shown[0])} x2={x(shown[0])} y1={0} y2={PLOT_H} stroke="var(--accent)" strokeWidth={0.75} />
+          <line x1={x(shown[1])} x2={x(shown[1])} y1={0} y2={PLOT_H} stroke="var(--accent)" strokeWidth={0.75} />
         </g>
       )}
     </svg>

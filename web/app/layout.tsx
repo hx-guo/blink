@@ -1,11 +1,10 @@
 import type { Metadata } from "next";
-import { Inter, Source_Serif_4 } from "next/font/google";
+import { Source_Serif_4 } from "next/font/google";
 import { Footer, Header } from "@/components/Shell";
 import "./globals.css";
 
-// 设计稿字体；构建时下载并随站点自托管，运行时不访问 Google
-const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
-const serif = Source_Serif_4({ subsets: ["latin"], variable: "--font-serif" });
+// 全站一种衬线字；构建时下载并随站点自托管，运行时不访问 Google
+const serif = Source_Serif_4({ subsets: ["latin"], style: ["normal", "italic"], variable: "--font-serif" });
 
 export const metadata: Metadata = {
   title: "TGF Catalog",
@@ -14,13 +13,11 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className={`${inter.variable} ${serif.variable}`} suppressHydrationWarning>
+    <html lang="en" className={serif.variable} suppressHydrationWarning>
       <body className="min-h-screen antialiased">
-        <div className="sheet">
-          <Header />
-          <main className="px-5 sm:px-10 py-8">{children}</main>
-          <Footer />
-        </div>
+        <Header />
+        <main className="page py-10">{children}</main>
+        <Footer />
       </body>
     </html>
   );

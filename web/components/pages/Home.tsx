@@ -5,8 +5,11 @@ import { useEffect, useMemo, useState } from "react";
 import EventMap, { type ExposureGrid, type MapEvent } from "@/components/EventMap";
 import EventTable, { type Ev } from "@/components/EventTable";
 import RangeBrush from "@/components/RangeBrush";
-import { ago, Loading } from "@/components/Shell";
+import { Loading } from "@/components/Shell";
 import { BASE, displayName, eventHref, lat as fmtLat, lon as fmtLon, sci, years } from "@/lib/format";
+
+const fmtLat1 = (x: number) => `${Math.abs(x).toFixed(1)}° ${x < 0 ? "S" : "N"}`;
+const fmtLon1 = (x: number) => `${Math.abs(x).toFixed(1)}° ${x < 0 ? "W" : "E"}`;
 import type { Index, LatestEvent } from "@/lib/types";
 import { useJson } from "@/lib/useData";
 import { useCatalogs } from "@/lib/useCatalogs";
@@ -109,157 +112,142 @@ export default function Home() {
     ],
   }));
   const many = index.instruments.length > 1;
+  const instruments = index.instruments.map((i) => i.instrument).join(", ");
   return (
-    <div className="flex flex-col gap-10">
-      <section className="grid gap-10 md:grid-cols-[1fr_330px] items-start pt-2">
-        <div className="flex flex-col gap-5">
-          <div className="eyebrow">Updated in near real time</div>
-          <h1 className="font-semibold" style={{ fontSize: "clamp(30px, 4.4vw, 48px)", lineHeight: 1.08, letterSpacing: "-0.01em" }}>
+    <div className="flex flex-col gap-16">
+      <section className="grid gap-12 md:grid-cols-[minmax(0,1fr)_300px]">
+        <div>
+          <h1 style={{ fontSize: "clamp(34px, 5vw, 54px)", lineHeight: 1.06, fontWeight: 400, letterSpacing: "-0.015em" }}>
             Terrestrial gamma-ray flashes, catalogued as the data arrive
           </h1>
-          <p className="prose secondary" style={{ maxWidth: 560, fontSize: 18, lineHeight: 1.55 }}>
+          <p className="mt-6 secondary" style={{ maxWidth: 540, fontSize: 19, lineHeight: 1.55 }}>
             Sub-millisecond bursts of gamma rays from thunderstorms, found in the data of space-borne gamma-ray
             detectors about an hour after the data arrive and selected by the data of the instrument alone. Every
             confirmed flash has a permanent name, its light curves and the exposure of the search.{" "}
-            <Link href="/about/">How the catalog is made</Link>
+            <Link href="/about/">How the catalog is made.</Link>
           </p>
-          <dl className="flex flex-wrap gap-x-10 gap-y-4 pt-2">
+          <dl className="mt-10 grid grid-cols-3 gap-6 pt-3 rule" style={{ maxWidth: 540 }}>
             <div>
-              <dd className="font-semibold" style={{ fontSize: 48, lineHeight: 1 }}>{nFinal.toLocaleString("en")}</dd>
-              <dt className="text-sm secondary mt-1">TGFs</dt>
+              <dt className="label">TGFs</dt>
+              <dd className="tabular mt-1" style={{ fontSize: 34, lineHeight: 1.1 }}>{nFinal.toLocaleString("en")}</dd>
             </div>
-            <div className="self-end">
-              <dd className="text-2xl font-semibold">{years(live).toFixed(1)} yr</dd>
-              <dt className="text-sm secondary mt-1">of searched data</dt>
+            <div>
+              <dt className="label">Searched data</dt>
+              <dd className="tabular mt-1" style={{ fontSize: 34, lineHeight: 1.1 }}>{years(live).toFixed(1)} <span style={{ fontSize: 18 }}>yr</span></dd>
             </div>
-            <div className="self-end">
-              <dd className="text-2xl font-semibold">{first.slice(0, 4)}–{last.slice(0, 4)}</dd>
-              <dt className="text-sm secondary mt-1">{index.instruments.map((i) => i.instrument).join(", ")}</dt>
+            <div>
+              <dt className="label">Since</dt>
+              <dd className="tabular mt-1" style={{ fontSize: 34, lineHeight: 1.1 }}>{first.slice(0, 4)}</dd>
             </div>
           </dl>
+          <p className="caption mt-3">{instruments}; data through {last}.</p>
         </div>
-        <aside className="flex flex-col gap-1 md:pl-8 md:border-l" style={{ borderColor: "var(--border-strong)" }}>
-          <div className="flex items-baseline justify-between">
-            <h2 className="text-lg font-semibold">Latest TGFs</h2>
-            <span className="text-xs muted">data through {last}</span>
-          </div>
-          <ul className="flex flex-col">
+        <aside>
+          <h2 className="label pb-2" style={{ borderBottom: "0.5px solid var(--border-strong)" }}>Latest</h2>
+          <ol>
             {(latest ?? []).slice(0, 6).map((e) => (
-              <li key={e.cand_id} style={{ borderTop: "1px solid var(--grid)" }}>
-                <Link href={eventHref({ name: e.name, cand_id: e.cand_id })} className="latest-row">
-                  <span className="dot-mark" style={{ background: "var(--accent)" }} aria-hidden />
-                  <span className="flex-1 min-w-0">
-                    <span className="block font-semibold text-sm" style={{ color: "var(--text-primary)" }}>
-                      {e.name ? displayName(e.name) : "Provisional"}
-                    </span>
-                    <span className="block text-xs secondary tabular">{e.peak.slice(0, 10)} {e.peak.slice(11, 19)} UTC</span>
-                    <span className="block text-xs muted tabular">{fmtLat(e.latitude)}, {fmtLon(e.longitude)}</span>
-                  </span>
-                  <span className="text-xs muted shrink-0 self-start pt-0.5">{ago(e.peak)}</span>
+              <li key={e.cand_id} className="py-2.5" style={{ borderBottom: "0.5px solid var(--border)" }}>
+                <Link href={eventHref({ name: e.name, cand_id: e.cand_id })} style={{ textDecoration: "none", fontSize: 17 }}>
+                  {e.name ? displayName(e.name) : "Provisional"}
                 </Link>
+                <div className="caption tabular" style={{ fontSize: 13.5 }}>
+                  {e.peak.slice(0, 10)} {e.peak.slice(11, 16)} UTC · {fmtLat1(e.latitude)}, {fmtLon1(e.longitude)}
+                </div>
               </li>
             ))}
-          </ul>
+          </ol>
         </aside>
       </section>
 
-      <section className="flex flex-col gap-3">
-        <div className="flex items-end justify-between gap-4 flex-wrap rule pt-5">
-          <div>
-            <h2 className="text-2xl font-semibold">Where they were seen</h2>
-            <p className="text-sm secondary mt-1">
-              Sub-satellite point of each TGF. The shading is the live time of the search, so the latitude range of
-              each orbit and the South Atlantic Anomaly, where the detectors are off, show as they are.
-            </p>
+      <figure className="flex flex-col gap-3">
+        {many && (
+          <div className="flex gap-5 text-sm">
+            {["all", ...index.instruments.map((i) => i.instrument)].map((d) => (
+              <button key={d} className="opt" aria-pressed={detector === d} onClick={() => setDetector(d)}>
+                {d === "all" ? "All detectors" : d}
+              </button>
+            ))}
           </div>
-          {many && (
-            <select className="control" value={detector} onChange={(e) => setDetector(e.target.value)} aria-label="Detector">
-              {["all", ...index.instruments.map((i) => i.instrument)].map((d) => (
-                <option key={d} value={d}>{d === "all" ? "All detectors" : d}</option>
-              ))}
-            </select>
-          )}
-        </div>
-        {catalogs ? (
-          <>
-            <EventMap events={mapEvents} highlight={highlight} exposures={exposures} />
-            <div className="flex items-center gap-5 flex-wrap text-xs secondary">
-              <span className="flex items-center gap-2">
-                <span className="dot-mark" style={{ background: "var(--accent)" }} /> TGF
-              </span>
-              <span className="flex items-center gap-2">
-                <span style={{ width: 48, height: 8, background: "linear-gradient(90deg, transparent, var(--exposure))", opacity: 0.55, border: "1px solid var(--border)" }} />
-                live time of the search, none to most
-              </span>
-            </div>
-            <div className="flex flex-col gap-2 pt-3">
-              <div className="flex items-center justify-between gap-3 flex-wrap">
-                <div className="seg" role="group" aria-label="Select by">
-                  {AXES.map((a) => (
-                    <button key={a.key} aria-pressed={axis === a.key} onClick={() => setAxis(a.key)}>{a.title}</button>
-                  ))}
-                </div>
-                {axis === "startMs" && (
-                  <div className="flex items-center gap-2 text-sm">
-                    <input
-                      type="date"
-                      className="control tabular"
-                      aria-label="From"
-                      min={first}
-                      max={last}
-                      value={sel ? iso(sel[0]) : ""}
-                      onChange={(e) => {
-                        if (!e.target.value) return setSel(null);
-                        const a = Date.parse(e.target.value);
-                        setSel([a, Math.max(sel ? sel[1] : a + DAY, a + DAY)]);
-                      }}
-                    />
-                    <span className="muted">to</span>
-                    <input
-                      type="date"
-                      className="control tabular"
-                      aria-label="To"
-                      min={first}
-                      max={last}
-                      value={sel ? iso(sel[1] - DAY) : ""}
-                      onChange={(e) => {
-                        if (!e.target.value) return setSel(null);
-                        const b = Date.parse(e.target.value) + DAY;
-                        setSel([Math.min(sel ? sel[0] : b - DAY, b - DAY), b]);
-                      }}
-                    />
-                  </div>
-                )}
-              </div>
-              <RangeBrush
-                key={axis + detector}
-                kind={axis === "startMs" ? "time" : "log"}
-                values={values}
-                selection={sel}
-                onChange={setSel}
-                tick={(v) => tick(axis, v)}
-                bins={axis === "startMs" ? 112 : 80}
-              />
-              <div className="text-sm secondary">
-                {sel ? (
-                  <>
-                    <strong style={{ color: "var(--text-primary)" }}>{picked.length.toLocaleString("en")}</strong> of{" "}
-                    {events.length.toLocaleString("en")} events, {rangeText(axis, sel)}{" "}
-                    <button className="link-btn" onClick={() => setSel(null)}>Clear</button>
-                  </>
-                ) : (
-                  <>Drag across the histogram to select a range{axis === "startMs" ? ", or enter the dates" : ""}; click a bar to select it.</>
-                )}
-              </div>
-            </div>
-          </>
-        ) : (
-          <Loading error={null} what="the catalog" />
         )}
-      </section>
+        {catalogs ? <EventMap events={mapEvents} highlight={highlight} exposures={exposures} /> : <Loading error={null} what="the catalog" />}
+        <figcaption className="caption" style={{ maxWidth: 760 }}>
+          <strong>Figure 1.</strong> Sub-satellite points of the {events.length.toLocaleString("en")} TGFs. The tinted
+          area is where the search had live time: it spans the latitudes of the orbit and leaves out the South Atlantic
+          Anomaly, where the detectors are off. Select a range in Figure 2 to pick out events.
+        </figcaption>
+      </figure>
 
-      <section className="flex flex-col gap-3 rule pt-5">
-        <h2 className="text-2xl font-semibold">{sel ? "Selected events" : "All events"}</h2>
+      {catalogs && (
+        <figure className="flex flex-col gap-3">
+          <div className="flex items-baseline justify-between gap-4 flex-wrap text-[15px]">
+            <div className="flex gap-5">
+              {AXES.map((a) => (
+                <button key={a.key} className="opt" aria-pressed={axis === a.key} onClick={() => setAxis(a.key)}>{a.title}</button>
+              ))}
+            </div>
+            {axis === "startMs" && (
+              <div className="flex items-baseline gap-2">
+                <span className="caption">From</span>
+                <input
+                  type="date"
+                  className="field"
+                  aria-label="From"
+                  min={first}
+                  max={last}
+                  value={sel ? iso(sel[0]) : ""}
+                  onChange={(e) => {
+                    if (!e.target.value) return setSel(null);
+                    const a = Date.parse(e.target.value);
+                    setSel([a, Math.max(sel ? sel[1] : a + DAY, a + DAY)]);
+                  }}
+                />
+                <span className="caption">to</span>
+                <input
+                  type="date"
+                  className="field"
+                  aria-label="To"
+                  min={first}
+                  max={last}
+                  value={sel ? iso(sel[1] - DAY) : ""}
+                  onChange={(e) => {
+                    if (!e.target.value) return setSel(null);
+                    const b = Date.parse(e.target.value) + DAY;
+                    setSel([Math.min(sel ? sel[0] : b - DAY, b - DAY), b]);
+                  }}
+                />
+              </div>
+            )}
+          </div>
+          <RangeBrush
+            key={axis + detector}
+            kind={axis === "startMs" ? "time" : "log"}
+            values={values}
+            selection={sel}
+            onChange={setSel}
+            tick={(v) => tick(axis, v)}
+            bins={axis === "startMs" ? 112 : 80}
+          />
+          <figcaption className="caption">
+            <strong>Figure 2.</strong>{" "}
+            {axis === "startMs" ? "TGFs per month." : axis === "duration" ? "TGFs by the width of their time window." : "TGFs by their nominal false-alarm rate."}{" "}
+            {sel ? (
+              <>
+                Selected: <span style={{ color: "var(--accent)" }}>{picked.length.toLocaleString("en")}</span> of{" "}
+                {events.length.toLocaleString("en")}, {rangeText(axis, sel)}.{" "}
+                <button className="link-btn" onClick={() => setSel(null)}>Clear</button>
+              </>
+            ) : (
+              <>Drag across the bars to select a range{axis === "startMs" ? " or enter the dates" : ""}; click a bar to select it.</>
+            )}
+          </figcaption>
+        </figure>
+      )}
+
+      <section className="flex flex-col gap-3">
+        <div className="flex items-baseline justify-between">
+          <h2 style={{ fontSize: 26, fontWeight: 400 }}>{sel ? "Selected events" : "Events"}</h2>
+          <span className="caption">Table 1</span>
+        </div>
         <EventTable events={picked} showDetector={many} />
       </section>
     </div>
