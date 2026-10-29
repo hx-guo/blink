@@ -1,19 +1,20 @@
 "use client";
 
-import { useMemo, useRef, useState, useEffect } from "react";
+import Link from "next/link";
+import { useMemo, useState, useEffect } from "react";
 import EventMap, { MAP_ASPECT_H, type MapEvent } from "@/components/EventMap";
 import EventTable, { type Ev } from "@/components/EventTable";
 import Ruler, { type RulerBin } from "@/components/Ruler";
-import { Loading } from "@/components/Shell";
-import { displayName, eventHref, sci, years } from "@/lib/format";
-import type { Index } from "@/lib/types";
+import { ago, Loading } from "@/components/Shell";
+import { displayName, eventHref, lat as fmtLat, lon as fmtLon, sci, years } from "@/lib/format";
+import type { Index, LatestEvent } from "@/lib/types";
 import { useJson } from "@/lib/useData";
 import { useCatalogs } from "@/lib/useCatalogs";
 import { site } from "@/site.config";
 
 type Axis = "startMs" | "duration" | "fa";
 const AXES: { key: Axis; title: string }[] = [
-  { key: "startMs", title: "Start Time" },
+  { key: "startMs", title: "Time" },
   { key: "duration", title: "Duration" },
   { key: "fa", title: "False-alarm rate" },
 ];
@@ -45,20 +46,14 @@ function label(axis: Axis, v: number): string {
 
 export default function Home() {
   const { data: index, error } = useJson<Index>("index.json");
+  const { data: latest } = useJson<LatestEvent[]>("latest.json");
   const catalogs = useCatalogs(index?.instruments.map((i) => i.slug) ?? []);
   const firstSlug = index?.instruments[0]?.slug ?? null;
   const { data: exposure } = useJson<Exposure>(firstSlug ? `${firstSlug}/exposure.json` : null);
   const [axis, setAxis] = useState<Axis>("startMs");
   const [detector, setDetector] = useState<string>("all");
-  const [menu, setMenu] = useState(false);
   const [hoverBin, setHoverBin] = useState<number | null>(null);
   const [lockBin, setLockBin] = useState<number | null>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const close = (e: MouseEvent) => menuRef.current && !menuRef.current.contains(e.target as Node) && setMenu(false);
-    document.addEventListener("click", close);
-    return () => document.removeEventListener("click", close);
-  }, []);
   useEffect(() => setLockBin(null), [axis, detector]);
 
   const all: Ev[] = useMemo(
@@ -124,59 +119,85 @@ export default function Home() {
     ],
   }));
 
+  const many = index.instruments.length > 1;
   return (
-    <div className="flex flex-col gap-8">
-      <section className="flex flex-col gap-5">
-        <h1 className="text-center font-bold" style={{ fontSize: "clamp(26px, 4vw, 40px)" }}>
-          Catalog for Terrestrial Gamma-Ray Flashes
-        </h1>
-        <p className="font-medium leading-relaxed" style={{ textAlign: "justify" }}>
-          Terrestrial gamma-ray flashes (TGFs) are bursts of gamma rays from thunderstorms that last less than a
-          millisecond. This catalog lists the TGFs found by the Event-Based Transient Search (EBTS), which tests every
-          time window that starts and ends on a detected event instead of binning the data, made fast by the
-          Snapshot-Stepping Algorithm (SSA). The search runs on the data of each instrument as soon as they arrive. An
-          event is selected by its significance alone, a nominal false-alarm rate below 10⁻⁵ per year, after trains of
-          candidates from precipitating particles and gamma-ray bursts are removed; no lightning data are needed, so
-          the catalog is updated in near real time and each confirmed event receives a permanent name TGF yymmddAA. It
-          now holds {nFinal.toLocaleString("en")} TGFs found by {index.instruments.map((i) => i.instrument).join(", ")} in{" "}
-          {years(live).toFixed(1)} years of searched data from {first} to {last}.
-        </p>
+    <div className="flex flex-col gap-10">
+      <section className="grid gap-8 md:grid-cols-[1fr_340px] items-start pt-4">
+        <div className="flex flex-col gap-5">
+          <div className="eyebrow">Updated in near real time</div>
+          <h1 className="font-semibold tracking-tight" style={{ fontSize: "clamp(28px, 4.2vw, 44px)", lineHeight: 1.1 }}>
+            Terrestrial gamma-ray flashes, catalogued as the data arrive
+          </h1>
+          <p className="secondary leading-relaxed" style={{ maxWidth: 560 }}>
+            Sub-millisecond bursts of gamma rays from thunderstorms, found in the data of space-borne gamma-ray
+            detectors about an hour after the data arrive and selected by the data of the instrument alone. Every
+            confirmed flash has a permanent name, its light curves and the exposure of the search.{" "}
+            <Link href="/about/">How the catalog is made</Link>
+          </p>
+          <dl className="flex flex-wrap gap-x-10 gap-y-4 pt-2">
+            <div>
+              <dd className="font-semibold" style={{ fontSize: 48, lineHeight: 1 }}>{nFinal.toLocaleString("en")}</dd>
+              <dt className="text-sm secondary mt-1">TGFs</dt>
+            </div>
+            <div className="self-end">
+              <dd className="text-2xl font-semibold">{years(live).toFixed(1)} yr</dd>
+              <dt className="text-sm secondary mt-1">of searched data</dt>
+            </div>
+            <div className="self-end">
+              <dd className="text-2xl font-semibold">{first.slice(0, 4)}–{last.slice(0, 4)}</dd>
+              <dt className="text-sm secondary mt-1">{index.instruments.map((i) => i.instrument).join(", ")}</dt>
+            </div>
+          </dl>
+        </div>
+        <aside className="card p-4 flex flex-col gap-1">
+          <div className="flex items-baseline justify-between">
+            <h2 className="text-sm font-semibold">Latest TGFs</h2>
+            <span className="text-xs muted">data through {last}</span>
+          </div>
+          <ul className="flex flex-col">
+            {(latest ?? []).slice(0, 6).map((e) => (
+              <li key={e.cand_id} style={{ borderTop: "1px solid var(--grid)" }}>
+                <Link href={eventHref({ name: e.name, cand_id: e.cand_id })} className="latest-row">
+                  <span className="dot-mark" style={{ background: "var(--accent)" }} aria-hidden />
+                  <span className="flex-1 min-w-0">
+                    <span className="block font-semibold text-sm" style={{ color: "var(--text-primary)" }}>
+                      {e.name ? displayName(e.name) : "Provisional"}
+                    </span>
+                    <span className="block text-xs secondary tabular">{e.peak.slice(0, 10)} {e.peak.slice(11, 19)} UTC</span>
+                    <span className="block text-xs muted tabular">{fmtLat(e.latitude)}, {fmtLon(e.longitude)}</span>
+                  </span>
+                  <span className="text-xs muted shrink-0 self-start pt-0.5">{ago(e.peak)}</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </aside>
       </section>
 
-      <section className="flex flex-col gap-4">
-        <div className="flex justify-center gap-4 flex-wrap">
-          {AXES.map((a) => (
-            <button key={a.key} className="chip" aria-pressed={axis === a.key} onClick={() => setAxis(a.key)}>
-              <span className="dot" />
-              {a.title}
-            </button>
-          ))}
-          <div className="relative" ref={menuRef}>
-            <button className="chip" aria-expanded={menu} onClick={() => setMenu((m) => !m)}>
-              {detector === "all" ? "Detector" : detector.replace("Insight-", "")} <span aria-hidden>{menu ? "⌃" : "⌄"}</span>
-            </button>
-            {menu && (
-              <div className="absolute z-20 mt-2 flex flex-col text-sm" style={{ background: "var(--surface)", border: "2px solid var(--border-strong)", borderRadius: 6, minWidth: 170 }}>
+      <section className="flex flex-col gap-3">
+        <div className="flex items-end justify-between gap-4 flex-wrap">
+          <div>
+            <h2 className="text-lg font-semibold">Where they were seen</h2>
+            <p className="text-sm secondary">Sub-satellite point of each TGF. Use the scale to pick a range.</p>
+          </div>
+          <div className="flex items-center gap-3 flex-wrap">
+            <span className="text-xs muted">Scale</span>
+            <div className="seg" role="group" aria-label="Scale">
+              {AXES.map((a) => (
+                <button key={a.key} aria-pressed={axis === a.key} onClick={() => setAxis(a.key)}>{a.title}</button>
+              ))}
+            </div>
+            {many && (
+              <select className="control" value={detector} onChange={(e) => setDetector(e.target.value)} aria-label="Detector">
                 {["all", ...index.instruments.map((i) => i.instrument)].map((d) => (
-                  <button
-                    key={d}
-                    className="text-left px-3 py-2"
-                    style={{ borderBottom: "1px dotted var(--border)", fontWeight: d === detector ? 700 : 500, color: d === detector ? "var(--accent)" : "inherit" }}
-                    onClick={() => {
-                      setDetector(d);
-                      setMenu(false);
-                    }}
-                  >
-                    {d === "all" ? "All detectors" : d.replace("Insight-", "")}
-                  </button>
+                  <option key={d} value={d}>{d === "all" ? "All detectors" : d}</option>
                 ))}
-              </div>
+              </select>
             )}
           </div>
         </div>
-
         {catalogs ? (
-          <div className="flex items-center gap-2 overflow-hidden">
+          <div className="card p-3 flex items-center gap-2 overflow-hidden">
             <div className="hidden md:block">
               <Ruler
                 title={AXES.find((a) => a.key === axis)!.title}
@@ -195,22 +216,22 @@ export default function Home() {
         )}
       </section>
 
-      <section>
+      <section className="flex flex-col gap-3">
+        <h2 className="text-lg font-semibold">All events</h2>
         <EventTable
           events={tableEvents}
+          showDetector={many}
           caption={
             lockBin != null && members[lockBin] ? (
               <div className="text-sm flex items-center gap-2">
-                <span className="badge" style={{ borderColor: "var(--accent)", color: "var(--accent)" }}>
+                <span className="badge" style={{ borderColor: "var(--accent)", color: "var(--text-primary)" }}>
                   {members[lockBin].length} events, {AXES.find((a) => a.key === axis)!.title.toLowerCase()}{" "}
                   {label(axis, members[lockBin][0][axis])} – {label(axis, members[lockBin][members[lockBin].length - 1][axis])}
                 </span>
                 <button className="muted" onClick={() => setLockBin(null)}>Show all</button>
               </div>
             ) : (
-              <div className="text-sm secondary">
-                {events.length.toLocaleString("en")} events · click the scale on the left of the map to pick a range
-              </div>
+              <div className="text-sm secondary">{events.length.toLocaleString("en")} events</div>
             )
           }
         />

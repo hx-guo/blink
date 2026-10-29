@@ -22,16 +22,16 @@ export type Ev = {
 
 type Key = "startMs" | "duration" | "fa" | "lon" | "lat" | "alt" | "solar";
 
-const COLUMNS: { key: Key | null; title: string; unit?: string }[] = [
-  { key: null, title: "ID" },
-  { key: null, title: "Detector" },
-  { key: "startMs", title: "Start Time", unit: "( UTC )" },
-  { key: "duration", title: "Duration", unit: "( µs )" },
-  { key: "fa", title: "False-alarm rate", unit: "( yr⁻¹ )" },
-  { key: "lon", title: "Longitude", unit: "( °E / °W )" },
-  { key: "lat", title: "Latitude", unit: "( °S / °N )" },
-  { key: "alt", title: "Altitude", unit: "( km )" },
-  { key: "solar", title: "Solar Time", unit: "( Apparent )" },
+const COLUMNS: { key: Key | null; title: string; unit?: string; num?: boolean; detector?: boolean }[] = [
+  { key: null, title: "Name" },
+  { key: null, title: "Detector", detector: true },
+  { key: "startMs", title: "Start", unit: "UTC" },
+  { key: "duration", title: "Duration", unit: "µs", num: true },
+  { key: "fa", title: "False-alarm rate", unit: "yr⁻¹", num: true },
+  { key: "lat", title: "Latitude", num: true },
+  { key: "lon", title: "Longitude", num: true },
+  { key: "alt", title: "Altitude", unit: "km", num: true },
+  { key: "solar", title: "Solar time", num: true },
 ];
 
 /** 1 2 3 … p−1 p p+1 … n−2 n−1 n（设计稿的页码样式） */
@@ -49,7 +49,8 @@ function pageList(page: number, pages: number): (number | "…")[] {
   return out;
 }
 
-export default function EventTable({ events, caption }: { events: Ev[]; caption?: React.ReactNode }) {
+export default function EventTable({ events, caption, showDetector = true }: { events: Ev[]; caption?: React.ReactNode; showDetector?: boolean }) {
+  const columns = COLUMNS.filter((c) => showDetector || !c.detector);
   const [sort, setSort] = useState<{ key: Key; desc: boolean }>({ key: "startMs", desc: true });
   const [size, setSize] = useState(100);
   const [page, setPage] = useState(0);
@@ -79,19 +80,20 @@ export default function EventTable({ events, caption }: { events: Ev[]; caption?
   return (
     <div className="flex flex-col gap-4">
       {caption}
-      <div className="overflow-x-auto">
-        <table className="grid-table tabular">
+      <div className="overflow-x-auto card">
+        <table className="data events tabular">
           <thead>
             <tr>
-              {COLUMNS.map((c) => (
+              {columns.map((c) => (
                 <th
                   key={c.title}
-                  style={{ cursor: c.key ? "pointer" : "default", borderRadius: 0 }}
+                  style={{ cursor: c.key ? "pointer" : "default", textAlign: c.num ? "right" : "left" }}
+                  aria-sort={c.key && sort.key === c.key ? (sort.desc ? "descending" : "ascending") : undefined}
                   onClick={() => c.key && setSort((s) => ({ key: c.key!, desc: s.key === c.key ? !s.desc : true }))}
                 >
                   {c.title}
+                  {c.unit && <span className="unit"> {c.unit}</span>}
                   {c.key && sort.key === c.key ? (sort.desc ? " ↓" : " ↑") : ""}
-                  {c.unit && <span className="unit">{c.unit}</span>}
                 </th>
               ))}
             </tr>
@@ -100,22 +102,19 @@ export default function EventTable({ events, caption }: { events: Ev[]; caption?
             {shown.map((e) => (
               <tr key={e.key}>
                 <td>
-                  <Link href={eventHref({ name: e.name, cand_id: e.cand })} style={{ color: "inherit" }}>
-                    {e.name ?? "pending"}
+                  <Link href={eventHref({ name: e.name, cand_id: e.cand })} className="font-semibold">
+                    {e.name ? `TGF ${e.name}` : "pending"}
                   </Link>
-                  {e.provisional && <div className="badge mt-1" style={{ fontWeight: 500 }}>provisional</div>}
+                  {e.provisional && <span className="badge ml-2">provisional</span>}
                 </td>
-                <td>{e.instrument.replace("Insight-", "")}</td>
-                <td>
-                  {e.start.slice(0, 10)}
-                  <div style={{ fontSize: 11, fontWeight: 500 }}>{e.start.slice(11, 29).replace("Z", "")}</div>
-                </td>
-                <td>{Math.round(e.duration)}</td>
-                <td>{sci(e.fa)}</td>
-                <td>{Math.abs(e.lon).toFixed(2)}°{e.lon < 0 ? "W" : "E"}</td>
-                <td>{Math.abs(e.lat).toFixed(2)}°{e.lat < 0 ? "S" : "N"}</td>
-                <td>{e.alt.toFixed(2)}</td>
-                <td>{e.solar}</td>
+                {showDetector && <td>{e.instrument}</td>}
+                <td>{e.start.slice(0, 10)} <span className="secondary">{e.start.slice(11, 23)}</span></td>
+                <td style={{ textAlign: "right" }}>{Math.round(e.duration)}</td>
+                <td style={{ textAlign: "right" }}>{sci(e.fa)}</td>
+                <td style={{ textAlign: "right" }}>{Math.abs(e.lat).toFixed(2)}°{e.lat < 0 ? "S" : "N"}</td>
+                <td style={{ textAlign: "right" }}>{Math.abs(e.lon).toFixed(2)}°{e.lon < 0 ? "W" : "E"}</td>
+                <td style={{ textAlign: "right" }}>{e.alt.toFixed(0)}</td>
+                <td style={{ textAlign: "right" }}>{e.solar.slice(0, 5)}</td>
               </tr>
             ))}
           </tbody>
@@ -123,7 +122,7 @@ export default function EventTable({ events, caption }: { events: Ev[]; caption?
       </div>
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <select className="page-btn" style={{ padding: "0 10px" }} value={size} onChange={(e) => setSize(Number(e.target.value))} aria-label="Rows per page">
-          {[20, 50, 100].map((s) => <option key={s} value={s}>{s} / Page</option>)}
+          {[20, 50, 100].map((s) => <option key={s} value={s}>{s} per page</option>)}
         </select>
         <nav className="flex items-center gap-2 flex-wrap" aria-label="Pages">
           <button className="page-btn" disabled={page === 0} onClick={() => setPage(page - 1)} aria-label="Previous page">‹</button>

@@ -7,37 +7,42 @@ import type { Index } from "@/lib/types";
 import { useJson } from "@/lib/useData";
 import Logo from "./Logo";
 
-/** 页头：站标与各仪器的最新数据时间（index.json，运行时取） */
+/** 多久以前，粗到小时或天 */
+export function ago(t: string): string {
+  const h = (Date.now() - Date.parse(t)) / 3.6e6;
+  if (h < 1) return "less than an hour ago";
+  if (h < 48) return `${Math.round(h)} h ago`;
+  return `${Math.round(h / 24)} days ago`;
+}
+
+/** 页头：站标、导航与最近一次更新（index.json，运行时取） */
 export function Header() {
   const { data: index } = useJson<Index>("index.json");
   const demo = index?.instruments.some((i) => i.demo);
   const unvalidated = index?.instruments.filter((i) => !i.public) ?? [];
+  const last = index?.instruments.map((i) => i.last_day).sort().slice(-1)[0];
   return (
     <>
-      <header className="mx-auto max-w-6xl px-4 pt-6 pb-2 flex items-center justify-between gap-6 flex-wrap">
-        <Link href="/" className="flex items-center gap-3" style={{ color: "var(--text-primary)", textDecoration: "none" }}>
-          <Logo size={56} />
-          <span>
-            <span className="block text-2xl font-bold leading-tight">
-              TGF<span style={{ color: "var(--accent)" }}>s</span> Catalog
-            </span>
-            <span className="block text-sm font-semibold" style={{ color: "var(--accent-strong)" }}>Find It Fast</span>
-          </span>
-        </Link>
-        {index && (
-          <div className="flex gap-10 text-sm">
-            <div>
-              <div className="font-semibold">Pipeline</div>
-              <div className="secondary tabular text-xs mt-1">{utc(index.generated_at, 0)}</div>
-            </div>
-            {index.instruments.map((i) => (
-              <Link key={i.slug} href={instrumentHref(i.slug)} style={{ color: "inherit", textDecoration: "none" }}>
-                <div className="font-semibold">{i.instrument.replace("Insight-", "")}</div>
-                <div className="secondary tabular text-xs mt-1" title="Data through">{i.last_day} 23:59:59</div>
-              </Link>
+      <header style={{ borderBottom: "1px solid var(--border)" }}>
+        <div className="mx-auto max-w-6xl px-4 h-14 flex items-center gap-8">
+          <Link href="/" className="flex items-center gap-2 shrink-0" style={{ color: "var(--text-primary)", textDecoration: "none" }}>
+            <Logo size={30} />
+            <span className="text-base font-semibold tracking-tight">TGF Catalog</span>
+          </Link>
+          <nav className="hidden sm:flex items-center gap-6 text-sm">
+            <Link href="/" className="nav">Catalog</Link>
+            {index?.instruments.map((i) => (
+              <Link key={i.slug} href={instrumentHref(i.slug)} className="nav">{i.instrument}</Link>
             ))}
-          </div>
-        )}
+            <Link href="/about/" className="nav">About</Link>
+          </nav>
+          {index && (
+            <div className="ml-auto flex items-center gap-2 text-xs secondary" title={`Pipeline run ${utc(index.generated_at, 0)} UTC; data through ${last}`}>
+              <span className="live-dot" aria-hidden />
+              <span>Updated {ago(index.generated_at)}</span>
+            </div>
+          )}
+        </div>
       </header>
       {(demo || unvalidated.length > 0) && (
         <div className="mx-auto max-w-6xl px-4">

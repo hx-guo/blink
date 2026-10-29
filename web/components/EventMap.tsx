@@ -80,24 +80,20 @@ export default function EventMap({
     <div className="relative" style={{ flex: 1, minWidth: 0 }}>
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" role="img" aria-label="Sub-satellite points of the TGFs">
         <defs>
-          <filter id="saa-blur" x="-20%" y="-20%" width="140%" height="140%">
-            <feGaussianBlur stdDeviation="9" />
-          </filter>
-          <linearGradient id="saa-fade" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stopColor="var(--saa)" stopOpacity="0.35" />
-            <stop offset="1" stopColor="var(--saa)" stopOpacity="0.9" />
-          </linearGradient>
+          <pattern id="saa-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+            <line x1="0" y1="0" x2="0" y2="6" stroke="var(--saa)" strokeWidth="1.2" />
+          </pattern>
         </defs>
         <path d={land} fill="var(--land)" />
         <path d={borders} fill="none" stroke="var(--land-edge)" strokeWidth={0.8} />
         {saa.length > 0 && (
-          <g filter="url(#saa-blur)">
-            {saa.map((d, i) => <path key={i} d={d} fill="url(#saa-fade)" stroke="var(--saa)" strokeOpacity={0.5} />)}
+          <g>
+            {saa.map((d, i) => <path key={i} d={d} fill="url(#saa-hatch)" stroke="url(#saa-hatch)" strokeWidth={0.6} />)}
           </g>
         )}
         {saaCenter && (
-          <text x={saaCenter[0]} y={saaCenter[1]} textAnchor="middle" dy="0.35em" fontSize={34} fontWeight={800} fill="var(--text-primary)" pointerEvents="none">
-            SAA
+          <text x={saaCenter[0]} y={saaCenter[1]} textAnchor="middle" dy="0.35em" fontSize={12} fill="var(--text-secondary)" pointerEvents="none" paintOrder="stroke" stroke="var(--surface)" strokeWidth={3}>
+            South Atlantic Anomaly · no data
           </text>
         )}
         {inclination != null &&
@@ -106,9 +102,8 @@ export default function EventMap({
             const [x1] = xy(180, lat);
             return (
               <g key={lat}>
-                <line x1={x0} x2={x1} y1={y} y2={y} stroke="var(--text-primary)" strokeWidth={1.4} strokeDasharray="3 4" />
-                <circle cx={x1} cy={y} r={4.5} fill="var(--text-primary)" />
-                <text x={x1 + 14} y={y} dy="0.35em" fontSize={15} fontWeight={700} fill="var(--text-primary)">
+                <line x1={x0} x2={x1} y1={y} y2={y} stroke="var(--axis)" strokeWidth={1} strokeDasharray="4 4" />
+                <text x={x1 + 8} y={y} dy="0.35em" fontSize={12} fill="var(--text-muted)">
                   {Math.abs(lat)}°{lat > 0 ? "N" : "S"}
                 </text>
               </g>
@@ -122,11 +117,11 @@ export default function EventMap({
               key={e.key}
               cx={x}
               cy={y}
-              r={hover === e ? 5 : on && highlight ? 3.6 : 2.4}
+              r={hover === e ? 5 : on && highlight ? 3.2 : 2}
               fill={e.provisional ? "var(--surface)" : "var(--accent)"}
               stroke={e.provisional ? "var(--accent)" : "none"}
               strokeWidth={1.4}
-              opacity={on ? (highlight ? 1 : 0.6) : 0.08}
+              opacity={on ? (highlight ? 1 : 0.5) : 0.06}
               style={{ cursor: "pointer" }}
               onMouseEnter={() => setHover(e)}
               onMouseLeave={() => setHover(null)}
@@ -140,8 +135,8 @@ export default function EventMap({
             y1={hoverXY[1]}
             x2={hoverXY[0] + (boxLeft ? 130 : -130)}
             y2={hoverXY[1]}
-            stroke="var(--accent)"
-            strokeWidth={1.4}
+            stroke="var(--axis)"
+            strokeWidth={1}
             strokeDasharray="3 3"
             pointerEvents="none"
           />
@@ -155,8 +150,9 @@ export default function EventMap({
             top: `${(hoverXY[1] / H) * 100}%`,
             transform: `translate(${boxLeft ? "0" : "-100%"}, -50%)`,
             background: "var(--surface)",
-            border: "2px solid var(--accent-strong)",
-            borderRadius: 10,
+            border: "1px solid var(--border-strong)",
+            boxShadow: "0 4px 12px rgba(0,0,0,0.12)",
+            borderRadius: 8,
             padding: "8px 10px",
             lineHeight: 1.5,
             pointerEvents: "none",

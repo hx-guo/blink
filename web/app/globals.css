@@ -13,16 +13,18 @@
   --border: #e6e6e6;
   --border-strong: #cdcdcd;
   --wash: rgba(38, 35, 38, 0.04);
-  --link: #ae4b3b;
-  --accent: #ae4b3b;
-  --accent-strong: #bd4234;
-  --accent-soft: #f3dcd8;
-  --land: #cdcdcd;
+  --link: #1f63b8;
+  /* 数据色：事件、选中态、刻度都用它；红色只给站标 */
+  --accent: #2a78d6;
+  --accent-strong: #1f63b8;
+  --accent-soft: #dce9f8;
+  --brand: #c4473a;
+  --land: #e4e4e2;
   --land-edge: #ffffff;
-  --saa: #e7b9b4;
-  /* 仪器固定配色：颜色跟随仪器，不跟随排序；首发只有 HXMT，用强调色 */
-  --inst-1: #ae4b3b;
-  --inst-2: #2a78d6;
+  --saa: #b9b8b4;
+  /* 仪器固定配色：颜色跟随仪器，不跟随排序 */
+  --inst-1: #2a78d6;
+  --inst-2: #eb6834;
   --inst-3: #1baf7a;
   /* 光变曲线：全部事例 / ACD 符合事例 */
   --series-1: #2a78d6;
@@ -45,15 +47,16 @@
     --border: #2f2b2e;
     --border-strong: #45414a;
     --wash: rgba(255, 255, 255, 0.05);
-    --link: #e08b7e;
-    --accent: #d9705f;
-    --accent-strong: #e07b6a;
-    --accent-soft: #4a2a25;
-    --land: #3a3639;
+    --link: #79a8ec;
+    --accent: #3987e5;
+    --accent-strong: #79a8ec;
+    --accent-soft: #1d3150;
+    --brand: #dc6a5c;
+    --land: #2f2c2e;
     --land-edge: #1e1b1d;
-    --saa: #6b3a33;
-    --inst-1: #d9705f;
-    --inst-2: #3987e5;
+    --saa: #5d5a5c;
+    --inst-1: #3987e5;
+    --inst-2: #d95926;
     --inst-3: #199e70;
     --series-1: #3987e5;
     --series-2: #d95926;
@@ -72,15 +75,16 @@ color-scheme: dark;
   --border: #2f2b2e;
   --border-strong: #45414a;
   --wash: rgba(255, 255, 255, 0.05);
-  --link: #e08b7e;
-  --accent: #d9705f;
-  --accent-strong: #e07b6a;
-  --accent-soft: #4a2a25;
-  --land: #3a3639;
+  --link: #79a8ec;
+  --accent: #3987e5;
+  --accent-strong: #79a8ec;
+  --accent-soft: #1d3150;
+  --brand: #dc6a5c;
+  --land: #2f2c2e;
   --land-edge: #1e1b1d;
-  --saa: #6b3a33;
-  --inst-1: #d9705f;
-  --inst-2: #3987e5;
+  --saa: #5d5a5c;
+  --inst-1: #3987e5;
+  --inst-2: #d95926;
   --inst-3: #199e70;
   --series-1: #3987e5;
   --series-2: #d95926;
@@ -159,9 +163,9 @@ a:hover {
   background: var(--wash);
 }
 .page-btn {
-  min-width: 32px;
-  height: 32px;
-  border: 2px solid var(--border-strong);
+  min-width: 30px;
+  height: 30px;
+  border: 1px solid var(--border-strong);
   border-radius: 6px;
   background: var(--surface);
   color: var(--text-primary);
@@ -171,7 +175,8 @@ a:hover {
 }
 .page-btn[aria-current="page"] {
   border-color: var(--accent);
-  color: var(--accent);
+  background: var(--accent-soft);
+  font-weight: 600;
 }
 .page-btn:disabled {
   opacity: 0.4;
@@ -246,4 +251,79 @@ table.data tbody tr:hover {
   border-radius: 6px;
   padding: 4px 8px;
   font-size: 13px;
+}
+.nav {
+  color: var(--text-secondary);
+}
+.nav:hover {
+  color: var(--text-primary);
+  text-decoration: none;
+}
+.live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--status-good);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--status-good) 20%, transparent);
+}
+.eyebrow {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent-strong);
+}
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 2px;
+  gap: 2px;
+}
+.seg button {
+  font-size: 13px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  color: var(--text-secondary);
+}
+.seg button[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.latest-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 2px;
+  text-decoration: none;
+}
+.latest-row:hover {
+  background: var(--wash);
+  text-decoration: none;
+}
+.dot-mark {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+table.data.events th,
+table.data.events td {
+  padding: 7px 12px;
+}
+table.data.events th {
+  font-size: 12px;
+  background: var(--wash);
+}
+table.data th.num,
+table.data td.num {
+  text-align: right;
+}
+table.data th .unit {
+  font-weight: 400;
+  color: var(--text-muted);
+}
+table.data tbody tr:last-child td {
+  border-bottom: none;
 }
