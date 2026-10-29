@@ -28,10 +28,8 @@ const COLUMNS: { key: Key | null; title: string; unit?: string; num?: boolean; d
   { key: "startMs", title: "Date" },
   { key: null, title: "Time", unit: "UTC" },
   { key: "duration", title: "Duration", unit: "µs", num: true },
-  { key: "fa", title: "False-alarm rate", unit: "per yr", num: true },
-  { key: "lat", title: "Position" },
-  { key: "alt", title: "Altitude", unit: "km", num: true },
-  { key: "solar", title: "Solar time", num: true },
+  { key: "fa", title: "False-alarm rate", unit: "yr⁻¹", num: true },
+  { key: "lat", title: "Position", num: true },
 ];
 
 /** 3.3×10⁻⁸ → 底数与指数分开排，指数对齐更好读 */
@@ -66,7 +64,7 @@ function pageList(page: number, pages: number): (number | "…")[] {
 export default function EventTable({ events, caption, showDetector = true }: { events: Ev[]; caption?: React.ReactNode; showDetector?: boolean }) {
   const columns = COLUMNS.filter((c) => showDetector || !c.detector);
   const [sort, setSort] = useState<{ key: Key; desc: boolean }>({ key: "startMs", desc: true });
-  const [size, setSize] = useState(100);
+  const [size, setSize] = useState(20);
   const [page, setPage] = useState(0);
   useEffect(() => setPage(0), [events, size]);
 
@@ -126,11 +124,9 @@ export default function EventTable({ events, caption, showDetector = true }: { e
                 <td className="secondary">{e.start.slice(11, 23)}</td>
                 <td style={{ textAlign: "right" }}>{Math.round(e.duration).toLocaleString("en")}</td>
                 <td style={{ textAlign: "right" }}><Sci x={e.fa} /></td>
-                <td>
+                <td style={{ textAlign: "right" }}>
                   {Math.abs(e.lat).toFixed(1)}° {e.lat < 0 ? "S" : "N"}, {Math.abs(e.lon).toFixed(1)}° {e.lon < 0 ? "W" : "E"}
                 </td>
-                <td style={{ textAlign: "right" }}>{e.alt.toFixed(0)}</td>
-                <td style={{ textAlign: "right" }}>{e.solar.slice(0, 5)}</td>
               </tr>
             ))}
           </tbody>

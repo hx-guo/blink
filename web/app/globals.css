@@ -112,14 +112,29 @@ a:hover {
   color: var(--accent);
 }
 .page {
-  max-width: 1080px;
+  max-width: 1240px;
   margin-inline: auto;
-  padding-inline: 28px;
+  padding-inline: 56px;
 }
 @media (max-width: 640px) {
   .page {
-    padding-inline: 18px;
+    padding-inline: 20px;
   }
+}
+/* 书页版式：左边一栏页边放标签与图注，右边放图表 */
+.margin-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 20px;
+}
+@media (min-width: 900px) {
+  .margin-grid {
+    grid-template-columns: 200px minmax(0, 1fr);
+    column-gap: 56px;
+  }
+}
+.margin-note {
+  max-width: 34em;
 }
 /* 字距拉开的小号大写：标签、导航、表头 */
 .label {
@@ -265,7 +280,7 @@ table.events thead th {
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--text-secondary);
-  padding: 9px 12px 7px;
+  padding: 10px 14px 9px;
   border-bottom: 0.5px solid var(--border-strong);
   white-space: nowrap;
 }
@@ -278,7 +293,7 @@ table.events thead th {
 }
 table.data td,
 table.events td {
-  padding: 7px 12px;
+  padding: 11px 14px;
   border-bottom: 0.5px solid var(--grid);
   white-space: nowrap;
 }

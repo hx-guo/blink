@@ -21,8 +21,8 @@ export function Header() {
   const unvalidated = index?.instruments.filter((i) => !i.public) ?? [];
   const last = index?.instruments.map((i) => i.last_day).sort().slice(-1)[0];
   return (
-    <header className="page pt-7">
-      <div className="flex items-baseline gap-8 flex-wrap pb-3" style={{ borderBottom: "0.5px solid var(--border-strong)" }}>
+    <header className="page pt-10">
+      <div className="flex items-baseline gap-10 flex-wrap pb-4" style={{ borderBottom: "0.5px solid var(--border-strong)" }}>
         <Link href="/" className="nav" style={{ color: "var(--text-primary)" }}>
           <span style={{ fontSize: 15, letterSpacing: "0.16em", textTransform: "uppercase" }}>TGF Catalog</span>
         </Link>
@@ -61,7 +61,7 @@ export function Header() {
 export function Footer() {
   const { data: index } = useJson<Index>("index.json");
   return (
-    <footer className="page pb-10">
+    <footer className="page pb-14">
       <div className="pt-3 flex flex-wrap justify-between gap-4 caption" style={{ borderTop: "0.5px solid var(--border-strong)" }}>
         <span>
           <Link href="/about/">About the catalog</Link>

@@ -114,139 +114,137 @@ export default function Home() {
   const many = index.instruments.length > 1;
   const instruments = index.instruments.map((i) => i.instrument).join(", ");
   return (
-    <div className="flex flex-col gap-16">
-      <section className="grid gap-12 md:grid-cols-[minmax(0,1fr)_300px]">
+    <div className="flex flex-col" style={{ gap: 132 }}>
+      <section className="margin-grid pt-16">
+        <div />
         <div>
-          <h1 style={{ fontSize: "clamp(34px, 5vw, 54px)", lineHeight: 1.06, fontWeight: 400, letterSpacing: "-0.015em" }}>
+          <h1 style={{ fontSize: "clamp(32px, 4.2vw, 46px)", lineHeight: 1.12, fontWeight: 400, letterSpacing: "-0.01em", maxWidth: "15em" }}>
             Terrestrial gamma-ray flashes, catalogued as the data arrive
           </h1>
-          <p className="mt-6 secondary" style={{ maxWidth: 540, fontSize: 19, lineHeight: 1.55 }}>
-            Sub-millisecond bursts of gamma rays from thunderstorms, found in the data of space-borne gamma-ray
-            detectors about an hour after the data arrive and selected by the data of the instrument alone. Every
-            confirmed flash has a permanent name, its light curves and the exposure of the search.{" "}
-            <Link href="/about/">How the catalog is made.</Link>
+          <p className="mt-8 secondary" style={{ maxWidth: "31em", fontSize: 18, lineHeight: 1.6 }}>
+            Bursts of gamma rays from thunderstorms, found in the data of space-borne detectors within about an hour
+            of their arrival, each with a permanent name. <Link href="/about/">How the catalog is made</Link>
           </p>
-          <dl className="mt-10 grid grid-cols-3 gap-6 pt-3 rule" style={{ maxWidth: 540 }}>
-            <div>
-              <dt className="label">TGFs</dt>
-              <dd className="tabular mt-1" style={{ fontSize: 34, lineHeight: 1.1 }}>{nFinal.toLocaleString("en")}</dd>
-            </div>
-            <div>
-              <dt className="label">Searched data</dt>
-              <dd className="tabular mt-1" style={{ fontSize: 34, lineHeight: 1.1 }}>{years(live).toFixed(1)} <span style={{ fontSize: 18 }}>yr</span></dd>
-            </div>
-            <div>
-              <dt className="label">Since</dt>
-              <dd className="tabular mt-1" style={{ fontSize: 34, lineHeight: 1.1 }}>{first.slice(0, 4)}</dd>
-            </div>
-          </dl>
-          <p className="caption mt-3">{instruments}; data through {last}.</p>
+          <p className="mt-14 tabular secondary" style={{ fontSize: 15, letterSpacing: "0.01em" }}>
+            <span style={{ color: "var(--text-primary)" }}>{nFinal.toLocaleString("en")}</span> TGFs
+            <span className="mx-3 muted">·</span>
+            <span style={{ color: "var(--text-primary)" }}>{years(live).toFixed(1)}</span> years of data
+            <span className="mx-3 muted">·</span>
+            {instruments}, {first.slice(0, 4)} to {last}
+          </p>
         </div>
-        <aside>
-          <h2 className="label pb-2" style={{ borderBottom: "0.5px solid var(--border-strong)" }}>Latest</h2>
-          <ol>
-            {(latest ?? []).slice(0, 6).map((e) => (
-              <li key={e.cand_id} className="py-2.5" style={{ borderBottom: "0.5px solid var(--border)" }}>
-                <Link href={eventHref({ name: e.name, cand_id: e.cand_id })} style={{ textDecoration: "none", fontSize: 17 }}>
-                  {e.name ? displayName(e.name) : "Provisional"}
-                </Link>
-                <div className="caption tabular" style={{ fontSize: 13.5 }}>
-                  {e.peak.slice(0, 10)} {e.peak.slice(11, 16)} UTC · {fmtLat1(e.latitude)}, {fmtLon1(e.longitude)}
-                </div>
-              </li>
-            ))}
-          </ol>
-        </aside>
       </section>
 
-      <figure className="flex flex-col gap-3">
-        {many && (
-          <div className="flex gap-5 text-sm">
-            {["all", ...index.instruments.map((i) => i.instrument)].map((d) => (
-              <button key={d} className="opt" aria-pressed={detector === d} onClick={() => setDetector(d)}>
-                {d === "all" ? "All detectors" : d}
-              </button>
-            ))}
-          </div>
-        )}
-        {catalogs ? <EventMap events={mapEvents} highlight={highlight} exposures={exposures} /> : <Loading error={null} what="the catalog" />}
-        <figcaption className="caption" style={{ maxWidth: 760 }}>
-          <strong>Figure 1.</strong> Sub-satellite points of the {events.length.toLocaleString("en")} TGFs. The tinted
-          area is where the search had live time: it spans the latitudes of the orbit and leaves out the South Atlantic
-          Anomaly, where the detectors are off. Select a range in Figure 2 to pick out events.
+      <section className="margin-grid">
+        <div className="margin-note">
+          <h2 className="label">Latest</h2>
+        </div>
+        <ol className="grid gap-x-10 gap-y-8 sm:grid-cols-2 lg:grid-cols-4">
+          {(latest ?? []).slice(0, 4).map((e) => (
+            <li key={e.cand_id}>
+              <Link href={eventHref({ name: e.name, cand_id: e.cand_id })} style={{ textDecoration: "none", fontSize: 18 }}>
+                {e.name ? displayName(e.name) : "Provisional"}
+              </Link>
+              <div className="caption tabular mt-1">{e.peak.slice(0, 10)}, {e.peak.slice(11, 16)} UTC</div>
+              <div className="caption tabular muted">{fmtLat1(e.latitude)}, {fmtLon1(e.longitude)}</div>
+            </li>
+          ))}
+        </ol>
+      </section>
+
+      <figure className="margin-grid">
+        <figcaption className="margin-note caption">
+          <span className="label block mb-3">Figure 1</span>
+          Where the {events.length.toLocaleString("en")} TGFs were seen, at the point below the satellite. The tint is
+          the area searched: the latitudes of the orbit, without the South Atlantic Anomaly, where the detectors are off.
+          {many && (
+            <span className="flex flex-col gap-1 mt-4">
+              {["all", ...index.instruments.map((i) => i.instrument)].map((d) => (
+                <button key={d} className="opt self-start" aria-pressed={detector === d} onClick={() => setDetector(d)}>
+                  {d === "all" ? "All detectors" : d}
+                </button>
+              ))}
+            </span>
+          )}
         </figcaption>
+        <div>{catalogs ? <EventMap events={mapEvents} highlight={highlight} exposures={exposures} /> : <Loading error={null} what="the catalog" />}</div>
       </figure>
 
       {catalogs && (
-        <figure className="flex flex-col gap-3">
-          <div className="flex items-baseline justify-between gap-4 flex-wrap text-[15px]">
-            <div className="flex gap-5">
+        <figure className="margin-grid">
+          <figcaption className="margin-note caption">
+            <span className="label block mb-3">Figure 2</span>
+            {axis === "startMs" ? "TGFs per month." : axis === "duration" ? "TGFs by the width of their window." : "TGFs by their false-alarm rate."}{" "}
+            Drag across it to select a range; the map and the table follow.
+            <span className="flex flex-col gap-1 mt-4">
               {AXES.map((a) => (
-                <button key={a.key} className="opt" aria-pressed={axis === a.key} onClick={() => setAxis(a.key)}>{a.title}</button>
+                <button key={a.key} className="opt self-start" aria-pressed={axis === a.key} onClick={() => setAxis(a.key)}>{a.title}</button>
               ))}
-            </div>
-            {axis === "startMs" && (
-              <div className="flex items-baseline gap-2">
-                <span className="caption">From</span>
-                <input
-                  type="date"
-                  className="field"
-                  aria-label="From"
-                  min={first}
-                  max={last}
-                  value={sel ? iso(sel[0]) : ""}
-                  onChange={(e) => {
-                    if (!e.target.value) return setSel(null);
-                    const a = Date.parse(e.target.value);
-                    setSel([a, Math.max(sel ? sel[1] : a + DAY, a + DAY)]);
-                  }}
-                />
-                <span className="caption">to</span>
-                <input
-                  type="date"
-                  className="field"
-                  aria-label="To"
-                  min={first}
-                  max={last}
-                  value={sel ? iso(sel[1] - DAY) : ""}
-                  onChange={(e) => {
-                    if (!e.target.value) return setSel(null);
-                    const b = Date.parse(e.target.value) + DAY;
-                    setSel([Math.min(sel ? sel[0] : b - DAY, b - DAY), b]);
-                  }}
-                />
-              </div>
-            )}
-          </div>
-          <RangeBrush
-            key={axis + detector}
-            kind={axis === "startMs" ? "time" : "log"}
-            values={values}
-            selection={sel}
-            onChange={setSel}
-            tick={(v) => tick(axis, v)}
-            bins={axis === "startMs" ? 112 : 80}
-          />
-          <figcaption className="caption">
-            <strong>Figure 2.</strong>{" "}
-            {axis === "startMs" ? "TGFs per month." : axis === "duration" ? "TGFs by the width of their time window." : "TGFs by their nominal false-alarm rate."}{" "}
-            {sel ? (
-              <>
-                Selected: <span style={{ color: "var(--accent)" }}>{picked.length.toLocaleString("en")}</span> of{" "}
-                {events.length.toLocaleString("en")}, {rangeText(axis, sel)}.{" "}
-                <button className="link-btn" onClick={() => setSel(null)}>Clear</button>
-              </>
-            ) : (
-              <>Drag across the bars to select a range{axis === "startMs" ? " or enter the dates" : ""}; click a bar to select it.</>
-            )}
+            </span>
           </figcaption>
+          <div className="flex flex-col gap-4">
+            <RangeBrush
+              key={axis + detector}
+              kind={axis === "startMs" ? "time" : "log"}
+              values={values}
+              selection={sel}
+              onChange={setSel}
+              tick={(v) => tick(axis, v)}
+              bins={axis === "startMs" ? 112 : 80}
+            />
+            <div className="flex items-baseline justify-between gap-6 flex-wrap caption" style={{ minHeight: 28 }}>
+              <span>
+                {sel ? (
+                  <>
+                    <span style={{ color: "var(--accent)" }}>{picked.length.toLocaleString("en")}</span> of{" "}
+                    {events.length.toLocaleString("en")} selected, {rangeText(axis, sel)}.{" "}
+                    <button className="link-btn" onClick={() => setSel(null)}>Clear</button>
+                  </>
+                ) : (
+                  <span className="muted">Nothing selected.</span>
+                )}
+              </span>
+              {axis === "startMs" && (
+                <span className="flex items-baseline gap-2">
+                  <input
+                    type="date"
+                    className="field"
+                    aria-label="From"
+                    min={first}
+                    max={last}
+                    value={sel ? iso(sel[0]) : ""}
+                    onChange={(e) => {
+                      if (!e.target.value) return setSel(null);
+                      const a = Date.parse(e.target.value);
+                      setSel([a, Math.max(sel ? sel[1] : a + DAY, a + DAY)]);
+                    }}
+                  />
+                  <span className="muted">to</span>
+                  <input
+                    type="date"
+                    className="field"
+                    aria-label="To"
+                    min={first}
+                    max={last}
+                    value={sel ? iso(sel[1] - DAY) : ""}
+                    onChange={(e) => {
+                      if (!e.target.value) return setSel(null);
+                      const b = Date.parse(e.target.value) + DAY;
+                      setSel([Math.min(sel ? sel[0] : b - DAY, b - DAY), b]);
+                    }}
+                  />
+                </span>
+              )}
+            </div>
+          </div>
         </figure>
       )}
 
-      <section className="flex flex-col gap-3">
-        <div className="flex items-baseline justify-between">
-          <h2 style={{ fontSize: 26, fontWeight: 400 }}>{sel ? "Selected events" : "Events"}</h2>
-          <span className="caption">Table 1</span>
+      <section className="margin-grid pb-10">
+        <div className="margin-note caption">
+          <span className="label block mb-3">Table 1</span>
+          {sel ? "The selected TGFs." : "All TGFs, newest first."} Altitude, local time and light curves are on the
+          page of each event.
         </div>
         <EventTable events={picked} showDetector={many} />
       </section>

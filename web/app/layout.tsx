@@ -16,7 +16,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="en" className={serif.variable} suppressHydrationWarning>
       <body className="min-h-screen antialiased">
         <Header />
-        <main className="page py-10">{children}</main>
+        <main className="page pb-24">{children}</main>
         <Footer />
       </body>
     </html>
