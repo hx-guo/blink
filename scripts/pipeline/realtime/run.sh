@@ -83,7 +83,19 @@ if [[ -n "${DEPLOY:-}" ]]; then
   echo "deployed to $DEPLOY"
 fi
 
-# keep the last KEEP_DAYS of catalogs and exports (the served export is always the newest)
-find "$RUN_DIR/catalogs/$SLUG" "$RUN_DIR/web" -mindepth 1 -maxdepth 1 -type d -mtime "+$KEEP_DAYS" -exec rm -rf {} +
-find "$RUN_DIR/logs" -name '*.log' -mtime "+$KEEP_DAYS" -delete
+# Of the exports (thousands of files each) only the served one is kept. Older catalogs and logs go
+# into one tar per day, archive/YYYYMMDD.tar, compressed once the day is over; KEEP_DAYS of them are kept.
+find "$RUN_DIR/web" -mindepth 1 -maxdepth 1 -type d ! -path "$EXPORT" -exec rm -rf {} +
+ARCHIVE="$RUN_DIR/archive"
+TODAY=${STAMP%%T*}
+mkdir -p "$ARCHIVE"
+for f in "$RUN_DIR/catalogs/$SLUG"/*T*Z "$RUN_DIR/logs"/*T*Z.log; do
+  [[ -e $f && $f != "$CATALOG" && $f != "$LOG" ]] || continue
+  tar -rf "$ARCHIVE/$TODAY.tar" -C "$RUN_DIR" "${f#"$RUN_DIR"/}"
+  rm -rf "$f"
+done
+for t in "$ARCHIVE"/*.tar; do
+  [[ -f $t && $t != "$ARCHIVE/$TODAY.tar" ]] && gzip -f "$t"
+done
+find "$ARCHIVE" -name '*.tar.gz' -mtime "+$KEEP_DAYS" -delete
 echo "== done $STAMP"
