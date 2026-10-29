@@ -114,7 +114,7 @@ export default function Home() {
   const many = index.instruments.length > 1;
   const instruments = index.instruments.map((i) => i.instrument).join(", ");
   return (
-    <div className="flex flex-col" style={{ gap: 132 }}>
+    <div className="flex flex-col" style={{ gap: 96 }}>
       <section className="margin-grid pt-16">
         <div />
         <div>
@@ -125,24 +125,32 @@ export default function Home() {
             Bursts of gamma rays from thunderstorms, found in the data of space-borne detectors within about an hour
             of their arrival, each with a permanent name. <Link href="/about/">How the catalog is made</Link>
           </p>
-          <p className="mt-14 tabular secondary" style={{ fontSize: 15, letterSpacing: "0.01em" }}>
-            <span style={{ color: "var(--text-primary)" }}>{nFinal.toLocaleString("en")}</span> TGFs
-            <span className="mx-3 muted">·</span>
-            <span style={{ color: "var(--text-primary)" }}>{years(live).toFixed(1)}</span> years of data
-            <span className="mx-3 muted">·</span>
-            {instruments}, {first.slice(0, 4)} to {last}
-          </p>
+          <dl className="mt-14 flex flex-wrap gap-x-16 gap-y-6">
+            <div>
+              <dd className="tabular" style={{ fontSize: 40, lineHeight: 1 }}>{nFinal.toLocaleString("en")}</dd>
+              <dt className="caption mt-2">TGFs</dt>
+            </div>
+            <div>
+              <dd className="tabular" style={{ fontSize: 40, lineHeight: 1 }}>{years(live).toFixed(1)}</dd>
+              <dt className="caption mt-2">years of searched data</dt>
+            </div>
+            <div>
+              <dd className="tabular" style={{ fontSize: 40, lineHeight: 1 }}>{first.slice(0, 4)}</dd>
+              <dt className="caption mt-2">to {last}, {instruments}</dt>
+            </div>
+          </dl>
         </div>
       </section>
 
-      <section className="margin-grid">
-        <div className="margin-note">
-          <h2 className="label">Latest</h2>
-        </div>
+      <section className="margin-grid section">
+        <header className="margin-note">
+          <h2 className="section-title">Latest</h2>
+          <p className="caption mt-2">The newest named TGFs.</p>
+        </header>
         <ol className="grid gap-x-10 gap-y-8 sm:grid-cols-2 lg:grid-cols-4">
           {(latest ?? []).slice(0, 4).map((e) => (
             <li key={e.cand_id}>
-              <Link href={eventHref({ name: e.name, cand_id: e.cand_id })} style={{ textDecoration: "none", fontSize: 18 }}>
+              <Link href={eventHref({ name: e.name, cand_id: e.cand_id })} style={{ textDecoration: "none", fontSize: 16 }}>
                 {e.name ? displayName(e.name) : "Provisional"}
               </Link>
               <div className="caption tabular mt-1">{e.peak.slice(0, 10)}, {e.peak.slice(11, 16)} UTC</div>
@@ -152,10 +160,10 @@ export default function Home() {
         </ol>
       </section>
 
-      <figure className="margin-grid">
+      <figure className="margin-grid section">
         <figcaption className="margin-note caption">
-          <span className="label block mb-3">Figure 1</span>
-          Where the {events.length.toLocaleString("en")} TGFs were seen, at the point below the satellite. The tint is
+          <h2 className="section-title mb-2">Where</h2>
+          <span style={{ color: "var(--text-primary)" }}>Figure 1.</span> Where the {events.length.toLocaleString("en")} TGFs were seen, at the point below the satellite. The tint is
           the area searched: the latitudes of the orbit, without the South Atlantic Anomaly, where the detectors are off.
           {many && (
             <span className="flex flex-col gap-1 mt-4">
@@ -171,9 +179,10 @@ export default function Home() {
       </figure>
 
       {catalogs && (
-        <figure className="margin-grid">
+        <figure className="margin-grid section">
           <figcaption className="margin-note caption">
-            <span className="label block mb-3">Figure 2</span>
+            <h2 className="section-title mb-2">When</h2>
+            <span style={{ color: "var(--text-primary)" }}>Figure 2.</span>{" "}
             {axis === "startMs" ? "TGFs per month." : axis === "duration" ? "TGFs by the width of their window." : "TGFs by their false-alarm rate."}{" "}
             Drag across it to select a range; the map and the table follow.
             <span className="flex flex-col gap-1 mt-4">
@@ -240,10 +249,10 @@ export default function Home() {
         </figure>
       )}
 
-      <section className="margin-grid pb-10">
+      <section className="margin-grid section pb-10">
         <div className="margin-note caption">
-          <span className="label block mb-3">Table 1</span>
-          {sel ? "The selected TGFs." : "All TGFs, newest first."} Altitude, local time and light curves are on the
+          <h2 className="section-title mb-2">Events</h2>
+          <span style={{ color: "var(--text-primary)" }}>Table 1.</span> {sel ? "The selected TGFs." : "All TGFs, newest first."} Altitude, local time and light curves are on the
           page of each event.
         </div>
         <EventTable events={picked} showDetector={many} />

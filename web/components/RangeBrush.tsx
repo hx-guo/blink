@@ -3,8 +3,8 @@
 import { useMemo, useRef, useState } from "react";
 
 const W = 960;
-const H = 92;
-const PLOT_H = 64;
+const H = 140;
+const PLOT_H = 112;
 const DAY = 86400000;
 
 /**

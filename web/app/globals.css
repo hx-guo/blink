@@ -322,3 +322,14 @@ table.events th .unit {
 table.events th .sort {
   color: var(--accent);
 }
+/* 层级：页面标题 46 → 关键数字 40 → 节标题 24 → 正文 15–16 → 图注 14 → 标签 11 */
+.section {
+  border-top: 0.5px solid var(--border-strong);
+  padding-top: 22px;
+}
+.section-title {
+  font-size: 24px;
+  font-weight: 400;
+  line-height: 1.2;
+  color: var(--text-primary);
+}
