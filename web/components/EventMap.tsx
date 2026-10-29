@@ -19,7 +19,7 @@ export type MapEvent = {
 
 const W = 960;
 /** 图框外留给刻度标签的边 */
-const ML = 38, MB = 22, MT = 4, MR = 4;
+const ML = 44, MB = 26, MT = 1, MR = 1;
 /** 画到的纬度范围：TGF 只在中低纬，高纬只留一点陆地作参照 */
 const LAT_MIN = -60;
 const LAT_MAX = 70;
@@ -121,7 +121,7 @@ export default function EventMap({
     [mounted, exposures],
   );
   const H = MT + PH + MB;
-  if (!mounted) return <div style={{ aspectRatio: `${W} / ${H}` }} />;
+  if (!mounted) return <div style={{ aspectRatio: `${PW + MR} / ${H}` }} />;
 
   const xy = (lon: number, lat: number) => projection([lon, lat]) ?? [0, 0];
   const [gx0, gy0] = xy(-180, 90);
@@ -132,7 +132,7 @@ export default function EventMap({
 
   return (
     <div className="relative">
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" role="img" aria-label="Sub-satellite points of the TGFs over the area searched">
+      <svg viewBox={`${ML} 0 ${PW + MR} ${H}`} className="w-full h-auto" style={{ overflow: "visible" }} role="img" aria-label="Sub-satellite points of the TGFs over the area searched">
         <defs>
           <clipPath id="map-frame">
             <rect x={ML} y={MT} width={PW} height={PH} />
@@ -151,11 +151,11 @@ export default function EventMap({
                 key={e.key}
                 cx={x}
                 cy={y}
-                r={hover === e ? 4 : picked ? 2.1 : 1.6}
+                r={hover === e ? 4 : picked ? 2 : 1.45}
                 fill={e.provisional ? "var(--surface)" : picked ? "var(--accent)" : "var(--ink)"}
                 stroke={e.provisional ? "var(--ink)" : "none"}
                 strokeWidth={0.8}
-                opacity={on ? (picked ? 0.95 : 0.55) : 0.1}
+                opacity={on ? (picked ? 0.9 : 0.42) : 0.08}
                 style={{ cursor: "pointer" }}
                 onMouseEnter={() => setHover(e)}
                 onMouseLeave={() => setHover(null)}
@@ -170,7 +170,7 @@ export default function EventMap({
           return (
             <g key={l}>
               <line x1={x} x2={x} y1={MT + PH} y2={MT + PH + 4} stroke="var(--border-strong)" strokeWidth={0.75} />
-              <text x={x} y={MT + PH + 16} textAnchor="middle" fontSize={11} fill="var(--text-secondary)">{lonLabel(l)}</text>
+              <text x={x} y={MT + PH + 19} textAnchor="middle" fontSize={13} fill="var(--text-secondary)">{lonLabel(l)}</text>
             </g>
           );
         })}
@@ -179,7 +179,7 @@ export default function EventMap({
           return (
             <g key={l}>
               <line x1={ML - 4} x2={ML} y1={y} y2={y} stroke="var(--border-strong)" strokeWidth={0.75} />
-              <text x={ML - 7} y={y} dy="0.35em" textAnchor="end" fontSize={11} fill="var(--text-secondary)">{latLabel(l)}</text>
+              <text x={ML - 8} y={y} dy="0.35em" textAnchor="end" fontSize={13} fill="var(--text-secondary)">{latLabel(l)}</text>
             </g>
           );
         })}
@@ -188,7 +188,7 @@ export default function EventMap({
         <div
           className="map-tip"
           style={{
-            left: `${((hoverXY[0] + (boxLeft ? 12 : -12)) / W) * 100}%`,
+            left: `${((hoverXY[0] - ML + (boxLeft ? 12 : -12)) / (PW + MR)) * 100}%`,
             top: `${(hoverXY[1] / H) * 100}%`,
             transform: `translate(${boxLeft ? "0" : "-100%"}, -50%)`,
           }}

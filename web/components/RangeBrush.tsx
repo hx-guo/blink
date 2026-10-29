@@ -105,12 +105,12 @@ export default function RangeBrush({
         return (
           <rect
             key={k}
-            x={k * binW + binW * 0.18}
+            x={k * binW + binW * 0.22}
             y={PLOT_H - h}
-            width={Math.max(0.5, binW * 0.64)}
+            width={Math.max(0.5, binW * 0.56)}
             height={h}
             fill={shown && inSel(k) ? "var(--accent)" : "var(--ink)"}
-            opacity={shown ? (inSel(k) ? 0.9 : 0.25) : 0.7}
+            opacity={shown ? (inSel(k) ? 0.85 : 0.18) : 0.42}
           >
             <title>{`${c} TGFs, ${tick(inv(lo + (k * (hi - lo)) / bins))} – ${tick(inv(lo + ((k + 1) * (hi - lo)) / bins))}`}</title>
           </rect>
@@ -120,7 +120,7 @@ export default function RangeBrush({
       {ticks.map((u) => (
         <g key={u}>
           <line x1={x(u)} x2={x(u)} y1={PLOT_H} y2={PLOT_H + 4} stroke="var(--border-strong)" strokeWidth={0.75} />
-          <text x={x(u)} y={PLOT_H + 17} textAnchor="middle" fontSize={11.5} fill="var(--text-secondary)" className="tabular">
+          <text x={x(u)} y={PLOT_H + 19} textAnchor="middle" fontSize={13} fill="var(--text-secondary)" className="tabular">
             {tick(inv(u))}
           </text>
         </g>

@@ -36,6 +36,30 @@ function rangeText(axis: Axis, [a, b]: [number, number]): string {
   return `${sci(a)} – ${sci(b)} yr⁻¹`;
 }
 
+/** 日期输入：纯文本 YYYY-MM-DD，回车或离开时生效；清空即取消选择 */
+function DateField({ label, value, onCommit }: { label: string; value: string; onCommit: (ms: number | null) => void }) {
+  const [text, setText] = useState(value);
+  useEffect(() => setText(value), [value]);
+  const commit = () => {
+    if (!text.trim()) return onCommit(null);
+    const ms = Date.parse(`${text.trim()}T00:00:00Z`);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(text.trim()) && Number.isFinite(ms)) onCommit(ms);
+    else setText(value);
+  };
+  return (
+    <input
+      className="field tabular"
+      aria-label={label}
+      placeholder="YYYY-MM-DD"
+      size={10}
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => e.key === "Enter" && commit()}
+    />
+  );
+}
+
 /** 各仪器的曝光（运行时取） */
 function useExposures(slugs: string[]): ExposureGrid[] {
   const [grids, setGrids] = useState<ExposureGrid[]>([]);
@@ -121,7 +145,7 @@ export default function Home() {
           <h1 style={{ fontSize: "clamp(32px, 4.2vw, 46px)", lineHeight: 1.12, fontWeight: 400, letterSpacing: "-0.01em", maxWidth: "15em" }}>
             Terrestrial gamma-ray flashes, catalogued as the data arrive
           </h1>
-          <p className="mt-8 secondary" style={{ maxWidth: "31em", fontSize: 18, lineHeight: 1.6 }}>
+          <p className="mt-8 secondary prose" style={{ maxWidth: "31em", fontSize: 18, lineHeight: 1.6 }}>
             Bursts of gamma rays from thunderstorms, found in the data of space-borne detectors within about an hour
             of their arrival, each with a permanent name. <Link href="/about/">How the catalog is made</Link>
           </p>
@@ -135,10 +159,11 @@ export default function Home() {
               <dt className="caption mt-2">years of searched data</dt>
             </div>
             <div>
-              <dd className="tabular" style={{ fontSize: 40, lineHeight: 1 }}>{first.slice(0, 4)}</dd>
-              <dt className="caption mt-2">to {last}, {instruments}</dt>
+              <dd className="tabular" style={{ fontSize: 40, lineHeight: 1 }}>1 h</dd>
+              <dt className="caption mt-2">between updates</dt>
             </div>
           </dl>
+          <p className="caption mt-6">{instruments}, {first} to {last}.</p>
         </div>
       </section>
 
@@ -215,32 +240,16 @@ export default function Home() {
               </span>
               {axis === "startMs" && (
                 <span className="flex items-baseline gap-2">
-                  <input
-                    type="date"
-                    className="field"
-                    aria-label="From"
-                    min={first}
-                    max={last}
+                  <DateField
+                    label="From"
                     value={sel ? iso(sel[0]) : ""}
-                    onChange={(e) => {
-                      if (!e.target.value) return setSel(null);
-                      const a = Date.parse(e.target.value);
-                      setSel([a, Math.max(sel ? sel[1] : a + DAY, a + DAY)]);
-                    }}
+                    onCommit={(d) => (d == null ? setSel(null) : setSel([d, Math.max(sel ? sel[1] : d + DAY, d + DAY)]))}
                   />
                   <span className="muted">to</span>
-                  <input
-                    type="date"
-                    className="field"
-                    aria-label="To"
-                    min={first}
-                    max={last}
+                  <DateField
+                    label="To"
                     value={sel ? iso(sel[1] - DAY) : ""}
-                    onChange={(e) => {
-                      if (!e.target.value) return setSel(null);
-                      const b = Date.parse(e.target.value) + DAY;
-                      setSel([Math.min(sel ? sel[0] : b - DAY, b - DAY), b]);
-                    }}
+                    onCommit={(d) => (d == null ? setSel(null) : setSel([Math.min(sel ? sel[0] : d, d), d + DAY]))}
                   />
                 </span>
               )}
