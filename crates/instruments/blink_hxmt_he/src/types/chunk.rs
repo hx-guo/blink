@@ -1,5 +1,5 @@
 use crate::algorithms::{config_guard, duplicate_guard};
-use crate::io::level_1b::{SciFile, get_sci_filenames};
+use crate::io::level_1b::{SciFile, get_eng_filenames, get_sci_filenames};
 use crate::io::level_1k::{AttFile, EventFile, OrbitFile};
 use crate::types::{Event, HxmtHe};
 use blink_core::error::Error;
@@ -154,8 +154,10 @@ impl blink_core::traits::Chunk for Chunk {
     }
 
     fn last_modified(epoch: &DateTime<Utc>) -> Result<DateTime<Utc>, Error> {
-        let sci_last_modifieds: Vec<DateTime<Utc>> = get_sci_filenames(*epoch)
+        // eng 也算：它晚到时这一小时先按缺数据排除，到了得能触发重搜
+        let level_1b_last_modifieds: Vec<DateTime<Utc>> = get_sci_filenames(*epoch)
             .iter()
+            .chain(get_eng_filenames(*epoch).iter())
             .map(|(_, filename)| {
                 let last_modified = std::fs::metadata(filename)?.modified()?;
                 let datetime: DateTime<Utc> = last_modified.into();
@@ -169,7 +171,7 @@ impl blink_core::traits::Chunk for Chunk {
             AttFile::last_modified(epoch)?,
         ];
 
-        let last_modifieds: Vec<DateTime<Utc>> = sci_last_modifieds
+        let last_modifieds: Vec<DateTime<Utc>> = level_1b_last_modifieds
             .into_iter()
             .chain(other_last_modifieds)
             .collect();
