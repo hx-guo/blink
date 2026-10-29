@@ -3,27 +3,29 @@
 /* 颜色一律按角色取 token；数值来自 dataviz 参考调色板（浅/深两套各自选定，不是自动反色） */
 :root {
   color-scheme: light;
-  --page: #ffffff;
-  --surface: #ffffff;
-  --text-primary: #262326;
-  --text-secondary: #555255;
-  --text-muted: #939193;
-  --grid: #e6e6e6;
-  --axis: #cdcdcd;
-  --border: #e6e6e6;
-  --border-strong: #cdcdcd;
-  --wash: rgba(38, 35, 38, 0.04);
-  --link: #1f63b8;
+  --page: #e8e4da;
+  --surface: #fcfbf7;
+  --text-primary: #1d1b17;
+  --text-secondary: #56524a;
+  --text-muted: #8e897e;
+  --grid: #e9e5dc;
+  --axis: #cbc5b8;
+  --border: #e2ddd2;
+  --border-strong: #c9c2b4;
+  --wash: rgba(60, 50, 30, 0.045);
+  --link: #24589c;
   /* 数据色：事件、选中态、刻度都用它；红色只给站标 */
-  --accent: #2a78d6;
-  --accent-strong: #1f63b8;
-  --accent-soft: #dce9f8;
-  --brand: #c4473a;
-  --land: #e4e4e2;
-  --land-edge: #ffffff;
+  --accent: #24589c;
+  --accent-strong: #1c4880;
+  --accent-soft: #e1e8f1;
+  --brand: #24589c;
+  --land: #ebe7de;
+  --land-edge: #fcfbf7;
   --saa: #b9b8b4;
+  /* 曝光底色：墨色，透明度随活时间 */
+  --exposure: #6f6553;
   /* 仪器固定配色：颜色跟随仪器，不跟随排序 */
-  --inst-1: #2a78d6;
+  --inst-1: #24589c;
   --inst-2: #eb6834;
   --inst-3: #1baf7a;
   /* 光变曲线：全部事例 / ACD 符合事例 */
@@ -37,8 +39,8 @@
 @media (prefers-color-scheme: dark) {
   :root:where(:not([data-theme="light"])) {
     color-scheme: dark;
-    --page: #161415;
-    --surface: #1e1b1d;
+    --page: #0f0e0d;
+    --surface: #1b1a17;
     --text-primary: #efedef;
     --text-secondary: #c2bfc2;
     --text-muted: #8d8a8d;
@@ -51,9 +53,10 @@
     --accent: #3987e5;
     --accent-strong: #79a8ec;
     --accent-soft: #1d3150;
-    --brand: #dc6a5c;
-    --land: #2f2c2e;
-    --land-edge: #1e1b1d;
+    --brand: #79a8ec;
+    --land: #2a2824;
+    --land-edge: #1b1a17;
+    --exposure: #d8cfbd;
     --saa: #5d5a5c;
     --inst-1: #3987e5;
     --inst-2: #d95926;
@@ -65,8 +68,8 @@
 }
 :root[data-theme="dark"] {
 color-scheme: dark;
-  --page: #161415;
-  --surface: #1e1b1d;
+  --page: #0f0e0d;
+  --surface: #1b1a17;
   --text-primary: #efedef;
   --text-secondary: #c2bfc2;
   --text-muted: #8d8a8d;
@@ -79,9 +82,10 @@ color-scheme: dark;
   --accent: #3987e5;
   --accent-strong: #79a8ec;
   --accent-soft: #1d3150;
-  --brand: #dc6a5c;
-  --land: #2f2c2e;
-  --land-edge: #1e1b1d;
+  --brand: #79a8ec;
+  --land: #2a2824;
+  --land-edge: #1b1a17;
+  --exposure: #d8cfbd;
   --saa: #5d5a5c;
   --inst-1: #3987e5;
   --inst-2: #d95926;
@@ -96,6 +100,28 @@ body {
   background: var(--page);
   color: var(--text-primary);
   font-family: var(--font-inter), system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+/* 一张摊开的纸：桌面底色上的纸面，衬线正文，细线分隔 */
+.sheet {
+  max-width: 1180px;
+  margin: 24px auto 48px;
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgba(40, 30, 10, 0.08), 0 12px 40px rgba(40, 30, 10, 0.10);
+}
+@media (max-width: 640px) {
+  .sheet {
+    margin: 0;
+    box-shadow: none;
+  }
+}
+.serif,
+h1,
+h2,
+.prose {
+  font-family: var(--font-serif), Georgia, "Times New Roman", serif;
+}
+.rule {
+  border-top: 1px solid var(--border-strong);
 }
 a {
   color: var(--link);
@@ -184,7 +210,7 @@ a:hover {
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 2px;
 }
 .muted {
   color: var(--text-muted);
@@ -326,4 +352,52 @@ table.data th .unit {
 }
 table.data tbody tr:last-child td {
   border-bottom: none;
+}
+.link-btn {
+  color: var(--link);
+  margin-left: 6px;
+}
+.link-btn:hover {
+  text-decoration: underline;
+}
+table.events {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+table.events thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
+  text-align: left;
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+  padding: 10px 14px 8px;
+  border-top: 1.5px solid var(--text-primary);
+  border-bottom: 1px solid var(--text-primary);
+  white-space: nowrap;
+}
+table.events th .unit {
+  font-weight: 400;
+  color: var(--text-muted);
+}
+table.events th .sort {
+  color: var(--accent);
+}
+table.events td {
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--grid);
+  white-space: nowrap;
+}
+table.events tbody tr:nth-child(even) td {
+  background: var(--wash);
+}
+table.events tbody tr:hover td {
+  background: var(--accent-soft);
+}
+table.events tbody tr:last-child td {
+  border-bottom: 1.5px solid var(--text-primary);
 }

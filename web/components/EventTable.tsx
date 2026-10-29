@@ -25,14 +25,28 @@ type Key = "startMs" | "duration" | "fa" | "lon" | "lat" | "alt" | "solar";
 const COLUMNS: { key: Key | null; title: string; unit?: string; num?: boolean; detector?: boolean }[] = [
   { key: null, title: "Name" },
   { key: null, title: "Detector", detector: true },
-  { key: "startMs", title: "Start", unit: "UTC" },
+  { key: "startMs", title: "Date" },
+  { key: null, title: "Time", unit: "UTC" },
   { key: "duration", title: "Duration", unit: "µs", num: true },
-  { key: "fa", title: "False-alarm rate", unit: "yr⁻¹", num: true },
-  { key: "lat", title: "Latitude", num: true },
-  { key: "lon", title: "Longitude", num: true },
+  { key: "fa", title: "False-alarm rate", unit: "per yr", num: true },
+  { key: "lat", title: "Position" },
   { key: "alt", title: "Altitude", unit: "km", num: true },
   { key: "solar", title: "Solar time", num: true },
 ];
+
+/** 3.3×10⁻⁸ → 底数与指数分开排，指数对齐更好读 */
+function Sci({ x }: { x: number }) {
+  if (!x) return <>–</>;
+  const e = Math.floor(Math.log10(x));
+  const m = x / 10 ** e;
+  return (
+    <>
+      {m.toFixed(1)}
+      <span className="muted"> × 10</span>
+      <sup style={{ display: "inline-block", minWidth: "2.2em", textAlign: "left" }}>{e}</sup>
+    </>
+  );
+}
 
 /** 1 2 3 … p−1 p p+1 … n−2 n−1 n（设计稿的页码样式） */
 function pageList(page: number, pages: number): (number | "…")[] {
@@ -80,8 +94,8 @@ export default function EventTable({ events, caption, showDetector = true }: { e
   return (
     <div className="flex flex-col gap-4">
       {caption}
-      <div className="overflow-x-auto card">
-        <table className="data events tabular">
+      <div className="overflow-x-auto">
+        <table className="events tabular">
           <thead>
             <tr>
               {columns.map((c) => (
@@ -93,7 +107,7 @@ export default function EventTable({ events, caption, showDetector = true }: { e
                 >
                   {c.title}
                   {c.unit && <span className="unit"> {c.unit}</span>}
-                  {c.key && sort.key === c.key ? (sort.desc ? " ↓" : " ↑") : ""}
+                  <span className="sort">{c.key && sort.key === c.key ? (sort.desc ? " ↓" : " ↑") : ""}</span>
                 </th>
               ))}
             </tr>
@@ -102,17 +116,19 @@ export default function EventTable({ events, caption, showDetector = true }: { e
             {shown.map((e) => (
               <tr key={e.key}>
                 <td>
-                  <Link href={eventHref({ name: e.name, cand_id: e.cand })} className="font-semibold">
+                  <Link href={eventHref({ name: e.name, cand_id: e.cand })} className="serif" style={{ fontWeight: 600, fontSize: 15 }}>
                     {e.name ? `TGF ${e.name}` : "pending"}
                   </Link>
                   {e.provisional && <span className="badge ml-2">provisional</span>}
                 </td>
                 {showDetector && <td>{e.instrument}</td>}
-                <td>{e.start.slice(0, 10)} <span className="secondary">{e.start.slice(11, 23)}</span></td>
-                <td style={{ textAlign: "right" }}>{Math.round(e.duration)}</td>
-                <td style={{ textAlign: "right" }}>{sci(e.fa)}</td>
-                <td style={{ textAlign: "right" }}>{Math.abs(e.lat).toFixed(2)}°{e.lat < 0 ? "S" : "N"}</td>
-                <td style={{ textAlign: "right" }}>{Math.abs(e.lon).toFixed(2)}°{e.lon < 0 ? "W" : "E"}</td>
+                <td>{e.start.slice(0, 10)}</td>
+                <td className="secondary">{e.start.slice(11, 23)}</td>
+                <td style={{ textAlign: "right" }}>{Math.round(e.duration).toLocaleString("en")}</td>
+                <td style={{ textAlign: "right" }}><Sci x={e.fa} /></td>
+                <td>
+                  {Math.abs(e.lat).toFixed(1)}° {e.lat < 0 ? "S" : "N"}, {Math.abs(e.lon).toFixed(1)}° {e.lon < 0 ? "W" : "E"}
+                </td>
                 <td style={{ textAlign: "right" }}>{e.alt.toFixed(0)}</td>
                 <td style={{ textAlign: "right" }}>{e.solar.slice(0, 5)}</td>
               </tr>
@@ -120,15 +136,16 @@ export default function EventTable({ events, caption, showDetector = true }: { e
           </tbody>
         </table>
       </div>
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <select className="page-btn" style={{ padding: "0 10px" }} value={size} onChange={(e) => setSize(Number(e.target.value))} aria-label="Rows per page">
-          {[20, 50, 100].map((s) => <option key={s} value={s}>{s} per page</option>)}
-        </select>
-        <nav className="flex items-center gap-2 flex-wrap" aria-label="Pages">
+      <div className="flex items-center justify-between gap-3 flex-wrap text-sm">
+        <span className="secondary tabular">
+          {sorted.length ? `${(page * size + 1).toLocaleString("en")}–${Math.min(sorted.length, (page + 1) * size).toLocaleString("en")}` : "0"} of{" "}
+          {sorted.length.toLocaleString("en")}
+        </span>
+        <nav className="flex items-center gap-1 flex-wrap" aria-label="Pages">
           <button className="page-btn" disabled={page === 0} onClick={() => setPage(page - 1)} aria-label="Previous page">‹</button>
           {pageList(page, pages).map((p, i) =>
             p === "…" ? (
-              <span key={`e${i}`} className="muted">···</span>
+              <span key={`e${i}`} className="muted px-1">…</span>
             ) : (
               <button key={p} className="page-btn" aria-current={p === page ? "page" : undefined} onClick={() => setPage(p)}>
                 {p + 1}
@@ -137,7 +154,12 @@ export default function EventTable({ events, caption, showDetector = true }: { e
           )}
           <button className="page-btn" disabled={page + 1 >= pages} onClick={() => setPage(page + 1)} aria-label="Next page">›</button>
         </nav>
-        <button className="page-btn" style={{ padding: "0 14px" }} onClick={download}>Download JSON</button>
+        <span className="flex items-center gap-3">
+          <select className="control" value={size} onChange={(e) => setSize(Number(e.target.value))} aria-label="Rows per page">
+            {[20, 50, 100].map((s) => <option key={s} value={s}>{s} per page</option>)}
+          </select>
+          <button className="control" onClick={download}>Download JSON</button>
+        </span>
       </div>
     </div>
   );

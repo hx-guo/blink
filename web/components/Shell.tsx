@@ -23,11 +23,11 @@ export function Header() {
   const last = index?.instruments.map((i) => i.last_day).sort().slice(-1)[0];
   return (
     <>
-      <header style={{ borderBottom: "1px solid var(--border)" }}>
-        <div className="mx-auto max-w-6xl px-4 h-14 flex items-center gap-8">
+      <header className="px-5 sm:px-10" style={{ borderBottom: "3px double var(--border-strong)" }}>
+        <div className="h-16 flex items-center gap-8">
           <Link href="/" className="flex items-center gap-2 shrink-0" style={{ color: "var(--text-primary)", textDecoration: "none" }}>
             <Logo size={30} />
-            <span className="text-base font-semibold tracking-tight">TGF Catalog</span>
+            <span className="serif text-xl font-semibold tracking-tight">TGF Catalog</span>
           </Link>
           <nav className="hidden sm:flex items-center gap-6 text-sm">
             <Link href="/" className="nav">Catalog</Link>
@@ -45,8 +45,8 @@ export function Header() {
         </div>
       </header>
       {(demo || unvalidated.length > 0) && (
-        <div className="mx-auto max-w-6xl px-4">
-          <div className="text-sm rounded-md px-3 py-2 mt-2" style={{ background: "var(--banner)" }}>
+        <div className="px-5 sm:px-10">
+          <div className="text-sm px-3 py-2 mt-3" style={{ background: "var(--banner)" }}>
             {demo && (
               <div>
                 <strong>Demo data.</strong> Events are from the Insight-HXMT/HE catalog v6; their light curves, GRB
@@ -69,7 +69,7 @@ export function Header() {
 export function Footer() {
   const { data: index } = useJson<Index>("index.json");
   return (
-    <footer className="mx-auto max-w-6xl px-4 py-8 flex flex-wrap justify-between gap-4 text-sm">
+    <footer className="px-5 sm:px-10 py-6 flex flex-wrap justify-between gap-4 text-sm" style={{ borderTop: "1px solid var(--border)" }}>
       <div className="muted text-xs">
         <Link href="/about/">About the catalog</Link>
         {index && <> · pipeline {index.instruments.map((i) => i.blink_git).join(", ")}</>}
