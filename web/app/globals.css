@@ -354,3 +354,21 @@ table.events th .sort {
   line-height: 1.2;
   color: var(--text-primary);
 }
+input.search {
+  flex: 1;
+  min-width: 16em;
+  background: transparent;
+  color: var(--text-primary);
+  border: none;
+  border-bottom: 1px solid var(--border-strong);
+  padding: 6px 2px;
+  font: inherit;
+  font-size: 18px;
+}
+input.search::placeholder {
+  color: var(--text-muted);
+}
+input.search:focus {
+  outline: none;
+  border-bottom-color: var(--accent);
+}

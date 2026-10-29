@@ -80,14 +80,7 @@ export default function EventTable({ events, caption, showDetector = true }: { e
   const pages = Math.max(1, Math.ceil(sorted.length / size));
   const shown = sorted.slice(page * size, (page + 1) * size);
 
-  const download = () => {
-    const blob = new Blob([JSON.stringify(sorted.map(({ key: _key, startMs: _ms, ...e }) => e), null, 1)], { type: "application/json" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "tgf-catalog.json";
-    a.click();
-    URL.revokeObjectURL(a.href);
-  };
+
 
   return (
     <div className="flex flex-col gap-4">
@@ -154,7 +147,6 @@ export default function EventTable({ events, caption, showDetector = true }: { e
           <select className="control" value={size} onChange={(e) => setSize(Number(e.target.value))} aria-label="Rows per page">
             {[20, 50, 100].map((s) => <option key={s} value={s}>{s} per page</option>)}
           </select>
-          <button className="link-btn" onClick={download}>Download JSON</button>
         </span>
       </div>
     </div>
