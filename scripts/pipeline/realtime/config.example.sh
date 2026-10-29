@@ -11,7 +11,7 @@ DEPLOY=""                                     # e.g. user@webhost:/path/to/site/
 DEPLOY_SSH="ssh -o BatchMode=yes"             # rsync -e; BatchMode: fail instead of asking for a password
 INSTRUMENT=hxmt-he                            # --instrument of blink
 SLUG=Insight-HXMT_HE                          # directory name of the instrument under data/
-DAYS_BACK=3                                   # days searched again on every run (late and re-sent data)
+DAYS_BACK=45                                  # days searched again on every run; HE data of 2025-26 arrived up to 34 days late
 KEEP_DAYS=14                                  # days of archived catalogs and logs of older runs
 # Command that receives a report on stdin when names are held for review or a run fails; empty: log only
 NOTIFY=""                                     # e.g. 'mail -s "TGF pipeline" someone@example.org'
