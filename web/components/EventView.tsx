@@ -25,7 +25,8 @@ export default function EventView({ event }: { event: EventRecord }) {
   const lc = event.light_curve;
   const rows: [string, React.ReactNode][] = [
     ["Peak", `${utc(event.peak, 6)} UTC`],
-    ["Window", `${utc(event.start, 6)} – ${utc(event.stop, 6).slice(11)} (${Math.round(event.duration_us)} µs)`],
+    ["Duration", `${Math.round(event.duration_us)} µs (best interval)`],
+    ["Window", `${utc(event.start, 6)} – ${utc(event.stop, 6).slice(11)}`],
     ["Counts", event.count],
     ["Nominal false-alarm rate", `${sci(event.false_positive_per_year, 2)} per year`],
     ["Sub-satellite point", `${lat(event.latitude)}, ${lon(event.longitude)}, ${event.altitude_km.toFixed(0)} km`],
