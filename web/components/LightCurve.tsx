@@ -44,7 +44,8 @@ function Legend() {
     </span>
   );
   return (
-    <div className="caption flex flex-wrap gap-x-6 gap-y-1 mb-3">
+    // 与绘图区左缘对齐（y 轴刻度在它左边），不从刻度数字那一栏开始
+    <div className="caption flex flex-wrap gap-x-6 gap-y-1 mb-3" style={{ paddingLeft: M.left }}>
       {item(
         "all",
         <>
