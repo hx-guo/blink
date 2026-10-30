@@ -105,7 +105,11 @@ export default function EventView({ event, head }: { event: EventRecord; head: R
           {event.status !== "final" && event.pending && (
             <p className="caption mt-4" style={{ maxWidth: "36em" }}>
               <span className="badge mr-2">Provisional</span>
-              {event.pending.split("|").map((p) => PENDING[p] ?? p).join("; ")}. It is named once the selection is complete.
+              {(() => {
+                const why = event.pending.split("|").map((p) => PENDING[p] ?? p).join("; ");
+                return why.charAt(0).toUpperCase() + why.slice(1);
+              })()}
+              . It is named once the selection is complete.
             </p>
           )}
           <div className="mt-10 grid gap-8" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", maxWidth: 820 }}>
