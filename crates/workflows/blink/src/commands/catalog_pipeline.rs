@@ -295,7 +295,8 @@ pub fn cmd_catalog_pipeline<I: Instrument>(
             time_string(&s.start),
             time_string(&s.stop),
             time_string(&s.peak_time()),
-            (s.stop - s.start).num_nanoseconds().expect("sub-ns range") as f64 / 1e3,
+            // 持续时间 = 最佳区间（最显著窗口首末事例之间），同 HXMT 目录论文；不是合并后整个候选窗的宽度
+            s.bin_size_best.get::<uom::si::time::microsecond>(),
             s.count,
             s.false_positive_per_year,
             wrap_longitude(s.position.longitude),
@@ -499,6 +500,8 @@ mod tests {
         let csv = fs::read_to_string(out.join("catalog.csv")).unwrap();
         let row = |t: &str| csv.lines().find(|l| l.contains(t)).map(str::to_string);
         assert!(row("T02:00:00Z").unwrap().contains(",final,,"));
+        // duration_us 是最佳区间 0.5 ms，不是 stop − start（这里为 0）
+        assert!(row("T02:00:00Z").unwrap().contains(",500.000,20,"), "{csv}");
         assert!(row("T04:00:00Z").unwrap().contains(",provisional,grb_background_gap,"));
         assert!(row("T05:00:00Z").unwrap().contains(",provisional,not_vetted,"));
         assert!(row("T23:55:00Z").unwrap().contains(",provisional,neighbors_unsearched,"));

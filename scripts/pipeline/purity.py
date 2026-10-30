@@ -14,7 +14,7 @@ peak after the light-travel correction. Only final events inside the WWLLN cover
 associations expected = sum of coincidence_probability. Fractions are given with binomial standard errors.
 
 Writes summary.txt and the tables as CSV to OUT_DIR (default: CATALOG_DIR/purity).
-duration_us is the width of the candidate window (merged windows), not the duration of the TGF.
+duration_us is the duration of the best interval, as in the HXMT paper.
 """
 import argparse, csv, json, math, os
 from collections import defaultdict
