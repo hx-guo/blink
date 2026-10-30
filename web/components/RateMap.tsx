@@ -1,92 +1,139 @@
 "use client";
 
-import { geoEqualEarth, geoGraticule10, geoPath } from "d3-geo";
-import { scaleQuantize } from "d3-scale";
+import { geoEquirectangular, geoPath } from "d3-geo";
 import { useMemo, useState } from "react";
 import { feature } from "topojson-client";
 import type { Topology } from "topojson-specification";
-import land110 from "world-atlas/land-110m.json";
+import land50 from "world-atlas/land-50m.json";
 import { useMounted } from "@/lib/useMounted";
-
-/** 顺序色阶（单一蓝色相，浅 → 深），来自 dataviz 参考调色板 */
-const RAMP = ["#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", "#0d366b"];
 
 export type RateCell = { lat0: number; lon0: number; size: number; events: number; hours: number };
 
-const WIDTH = 960;
-const HEIGHT = 470;
+const W = 960;
+const ML = 44, MB = 26, MT = 1, MR = 1;
+/** 轨道倾角 43°，率图只画到 ±50° */
+const LAT_MIN = -50;
+const LAT_MAX = 50;
+const PW = W - ML - MR;
+const PH = Math.round((PW / 360) * (LAT_MAX - LAT_MIN));
+
+/** 率的分档（每小时 TGF 数），近似对数等距；色阶由纸色到墨色，深浅两套主题各自成立 */
+const STEPS = [0.02, 0.05, 0.1, 0.2, 0.5, 1];
+const INK = [6, 16, 28, 42, 58, 74, 90];
+const shade = (k: number) => `color-mix(in oklab, var(--ink) ${INK[k]}%, var(--page))`;
+const classOf = (r: number) => STEPS.filter((s) => r >= s).length;
+
+const lonLabel = (l: number) => (l === 0 || Math.abs(l) === 180 ? `${Math.abs(l)}°` : `${Math.abs(l)}°${l < 0 ? "W" : "E"}`);
+const latLabel = (l: number) => (l === 0 ? "0°" : `${Math.abs(l)}°${l < 0 ? "S" : "N"}`);
 
 /**
- * 每格事件数 / 曝光小时数。曝光太少的格不上色（率没有意义），图例写明阈值。
+ * 每格 TGF 数 / 该格的搜索活时间（小时），与首页地图同一图框与刻度。活时间不足 `minHours`
+ * 的格不画（SAA 与轨道边缘），那里的率没有意义。
  */
 export default function RateMap({ cells, minHours }: { cells: RateCell[]; minHours: number }) {
   const mounted = useMounted();
-  const [hover, setHover] = useState<{ c: RateCell; x: number; y: number } | null>(null);
-  const shown = cells.filter((c) => c.hours >= minHours);
-  const rates = shown.map((c) => c.events / c.hours);
-  const max = Math.max(1e-9, ...rates);
-  const color = scaleQuantize<string>().domain([0, max]).range(RAMP);
-  const { path, land, grid, outline } = useMemo(() => {
-    const projection = geoEqualEarth().fitExtent([[4, 4], [WIDTH - 4, HEIGHT - 4]], { type: "Sphere" });
-    const path = geoPath(projection).digits(1);
-    const topo = land110 as unknown as Topology;
-    return {
-      path,
-      land: path(feature(topo, topo.objects.land)) ?? "",
-      grid: path(geoGraticule10()) ?? "",
-      outline: path({ type: "Sphere" }) ?? "",
-    };
+  const [hover, setHover] = useState<RateCell | null>(null);
+  const { land, projection } = useMemo(() => {
+    const topo = land50 as unknown as Topology;
+    const projection = geoEquirectangular()
+      .scale(PW / (2 * Math.PI))
+      .translate([ML + PW / 2, MT + (LAT_MAX / (LAT_MAX - LAT_MIN)) * PH]);
+    return { projection, land: geoPath(projection).digits(1)(feature(topo, topo.objects.land as never)) ?? "" };
   }, []);
-  if (!mounted) return <div style={{ aspectRatio: `${WIDTH} / ${HEIGHT + 40}` }} />;
+  const H = MT + PH + MB;
+  if (!mounted) return <div style={{ aspectRatio: `${PW + MR} / ${H + 40}` }} />;
 
-  // 经纬格画成多边形（沿纬线加点，投影后边是曲的）
-  const cellPath = (c: RateCell) => {
-    const lon0 = c.lon0 > 180 ? c.lon0 - 360 : c.lon0;
-    const steps = 4;
-    const ring: [number, number][] = [];
-    for (let k = 0; k <= steps; k++) ring.push([lon0 + (c.size * k) / steps, c.lat0]);
-    for (let k = steps; k >= 0; k--) ring.push([lon0 + (c.size * k) / steps, c.lat0 + c.size]);
-    ring.push(ring[0]);
-    return path({ type: "Polygon", coordinates: [ring.reverse()] }) ?? "";
-  };
+  const xy = (lon: number, lat: number) => projection([lon, lat]) ?? [0, 0];
+  const west = (c: RateCell) => (c.lon0 >= 180 ? c.lon0 - 360 : c.lon0);
+  const shown = cells.filter((c) => c.hours >= minHours && c.lat0 + c.size > LAT_MIN && c.lat0 < LAT_MAX);
+  const hoverXY = hover ? xy(west(hover) + hover.size / 2, hover.lat0 + hover.size / 2) : null;
+  const left = hoverXY ? hoverXY[0] < W * 0.62 : true;
 
   return (
-    <div className="relative">
-      <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} className="w-full h-auto" role="img" aria-label="TGFs per hour of exposure">
-        <path d={outline} fill="var(--surface)" stroke="var(--axis)" />
-        {shown.map((c, i) => (
-          <path
-            key={i}
-            d={cellPath(c)}
-            fill={color(c.events / c.hours)}
-            stroke="var(--surface)"
-            strokeWidth={hover?.c === c ? 0 : 0.5}
-            onMouseEnter={(e) => {
-              const r = (e.currentTarget.ownerSVGElement as SVGSVGElement).getBoundingClientRect();
-              setHover({ c, x: ((e.clientX - r.left) / r.width) * WIDTH, y: ((e.clientY - r.top) / r.height) * HEIGHT });
+    <div>
+      <div className="relative">
+        <svg viewBox={`${ML} 0 ${PW + MR} ${H}`} className="w-full h-auto" style={{ overflow: "visible" }} role="img" aria-label="TGFs per hour of exposure in 5° cells">
+          <defs>
+            <clipPath id="rate-frame">
+              <rect x={ML} y={MT} width={PW} height={PH} />
+            </clipPath>
+          </defs>
+          <g clipPath="url(#rate-frame)">
+            {shown.map((c, i) => {
+              const [x0, y0] = xy(west(c), c.lat0 + c.size);
+              const [x1, y1] = xy(west(c) + c.size, c.lat0);
+              return (
+                <rect
+                  key={i}
+                  x={x0}
+                  y={y0}
+                  width={x1 - x0 + 0.3}
+                  height={y1 - y0 + 0.3}
+                  fill={shade(classOf(c.events / c.hours))}
+                  onMouseEnter={() => setHover(c)}
+                  onMouseLeave={() => setHover(null)}
+                />
+              );
+            })}
+            {/* 海岸线：纸色衬底上一道墨线，深浅格上都看得见 */}
+            <path d={land} fill="none" stroke="var(--page)" strokeWidth={1.8} strokeOpacity={0.8} pointerEvents="none" />
+            <path d={land} fill="none" stroke="var(--ink)" strokeWidth={0.6} strokeOpacity={0.8} pointerEvents="none" />
+            {hover && hoverXY && (() => {
+              const [x0, y0] = xy(west(hover), hover.lat0 + hover.size);
+              const [x1, y1] = xy(west(hover) + hover.size, hover.lat0);
+              return <rect x={x0} y={y0} width={x1 - x0} height={y1 - y0} fill="none" stroke="var(--accent)" strokeWidth={1.2} pointerEvents="none" />;
+            })()}
+          </g>
+          <rect x={ML} y={MT} width={PW} height={PH} fill="none" stroke="var(--border-strong)" strokeWidth={0.75} />
+          {[-120, -60, 0, 60, 120].map((l) => {
+            const [x] = xy(l, 0);
+            return (
+              <g key={l}>
+                <line x1={x} x2={x} y1={MT + PH} y2={MT + PH + 4} stroke="var(--border-strong)" strokeWidth={0.75} />
+                <text x={x} y={MT + PH + 19} textAnchor="middle" fontSize={13} fill="var(--text-secondary)">{lonLabel(l)}</text>
+              </g>
+            );
+          })}
+          {[-40, -20, 0, 20, 40].map((l) => {
+            const [, y] = xy(0, l);
+            return (
+              <g key={l}>
+                <line x1={ML - 4} x2={ML} y1={y} y2={y} stroke="var(--border-strong)" strokeWidth={0.75} />
+                <text x={ML - 8} y={y} dy="0.35em" textAnchor="end" fontSize={13} fill="var(--text-secondary)">{latLabel(l)}</text>
+              </g>
+            );
+          })}
+        </svg>
+        {hover && hoverXY && (
+          <div
+            className="map-tip"
+            style={{
+              left: `${((hoverXY[0] - ML + (left ? 14 : -14)) / (PW + MR)) * 100}%`,
+              top: `${(hoverXY[1] / H) * 100}%`,
+              transform: `translate(${left ? "0" : "-100%"}, -50%)`,
             }}
-            onMouseLeave={() => setHover(null)}
-          />
-        ))}
-        <path d={grid} fill="none" stroke="var(--grid)" strokeWidth={0.4} pointerEvents="none" />
-        <path d={land} fill="none" stroke="var(--text-secondary)" strokeWidth={0.7} pointerEvents="none" />
-      </svg>
-      {hover && (
-        <div className="tooltip" style={{ left: `${(hover.x / WIDTH) * 100}%`, top: `${(hover.y / HEIGHT) * 100}%`, transform: `translate(${hover.x > WIDTH * 0.7 ? "-105%" : "10px"}, -50%)` }}>
-          <div style={{ fontWeight: 600 }} className="tabular">
-            {hover.c.lat0}° to {hover.c.lat0 + hover.c.size}°, {hover.c.lon0 > 180 ? hover.c.lon0 - 360 : hover.c.lon0}° to {(hover.c.lon0 > 180 ? hover.c.lon0 - 360 : hover.c.lon0) + hover.c.size}°
+          >
+            <div className="tabular" style={{ fontWeight: 600 }}>
+              {latLabel(hover.lat0)} to {latLabel(hover.lat0 + hover.size)}, {lonLabel(west(hover))} to {lonLabel(west(hover) + hover.size)}
+            </div>
+            <div className="tabular">{(hover.events / hover.hours).toFixed(3)} TGFs per hour</div>
+            <div className="tabular secondary">{hover.events} TGFs in {hover.hours.toFixed(0)} h</div>
           </div>
-          <div className="tabular">{(hover.c.events / hover.c.hours).toFixed(3)} TGFs per hour</div>
-          <div className="tabular secondary">{hover.c.events} TGFs in {hover.c.hours.toFixed(0)} h of exposure</div>
-        </div>
-      )}
-      <div className="flex items-center gap-2 text-xs secondary mt-2 flex-wrap">
+        )}
+      </div>
+      <div className="flex items-start gap-4 caption mt-4 flex-wrap">
         <span>TGFs per hour of exposure</span>
-        <span className="flex">
-          {RAMP.map((c) => <span key={c} style={{ width: 28, height: 10, background: c, display: "inline-block" }} />)}
-        </span>
-        <span className="tabular">0 – {max.toFixed(2)}</span>
-        <span className="muted">· cells with less than {minHours} h of exposure are blank</span>
+        <svg width={INK.length * 40 + 20} height={34} aria-hidden>
+          {INK.map((_, k) => (
+            <rect key={k} x={10 + k * 40} y={2} width={40} height={10} fill={shade(k)} />
+          ))}
+          {STEPS.map((s, k) => (
+            <g key={s}>
+              <line x1={10 + (k + 1) * 40} x2={10 + (k + 1) * 40} y1={12} y2={16} stroke="var(--border-strong)" strokeWidth={0.75} />
+              <text x={10 + (k + 1) * 40} y={29} textAnchor="middle" fontSize={13} fill="var(--text-secondary)" className="tabular">{s}</text>
+            </g>
+          ))}
+        </svg>
       </div>
     </div>
   );

@@ -378,7 +378,7 @@ export default function Home() {
               </li>
             </ul>
             <p className="caption mt-3">
-              Light curves and the vetting of each TGF are on its page and in <span className="tabular">events/&lt;id&gt;.json</span>.
+              The columns are described on the <Link href="/about/#columns">About</Link> page. Light curves and the vetting of each TGF are on its page and in <span className="tabular">events/&lt;id&gt;.json</span>.
             </p>
           </div>
           <div className="flex flex-col gap-8">
