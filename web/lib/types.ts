@@ -90,6 +90,8 @@ export type EventRecord = {
   longitude: number;
   latitude: number;
   altitude_km: number;
+  /** 星下点的视太阳时 HH:MM:SS */
+  solar_time?: string;
   neighbors_10min: number | null;
   grb_z: number | null;
   grb_max_box_share: number | null;

@@ -13,6 +13,7 @@ import { BASE, displayName, eventHref, lat as fmtLat, lon as fmtLon, sci } from 
 import type { Catalog, Index } from "@/lib/types";
 import { useJson } from "@/lib/useData";
 import { useCatalogs } from "@/lib/useCatalogs";
+import Sup from "@/components/Sup";
 
 type Axis = "startMs" | "duration" | "fa";
 const AXES: { key: Axis; title: string }[] = [
@@ -328,7 +329,7 @@ export default function Home() {
             <div className="caption flex gap-x-6 gap-y-1 flex-wrap -mt-5">
               {(Object.keys(sels) as Axis[]).map((a) => (
                 <span key={a}>
-                  {rangeText(a, sels[a]!)} <button className="link-btn" aria-label="Remove" onClick={() => setSel(a, null)}>×</button>
+                  <Sup text={rangeText(a, sels[a]!)} /> <button className="link-btn" aria-label="Remove" onClick={() => setSel(a, null)}>×</button>
                 </span>
               ))}
               {region && (

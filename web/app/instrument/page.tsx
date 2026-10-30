@@ -8,6 +8,7 @@ import { sci, utc, years } from "@/lib/format";
 import type { Index } from "@/lib/types";
 import { useJson, useParam } from "@/lib/useData";
 import { useCatalogs } from "@/lib/useCatalogs";
+import Sup from "@/components/Sup";
 
 type Exposure = {
   live_seconds: number;
@@ -229,7 +230,7 @@ export default function InstrumentPage() {
             <tbody>
               {funnel.map(([k, removed, left]) => (
                 <tr key={k}>
-                  <td className="secondary" style={{ whiteSpace: "normal" }}>{k}</td>
+                  <td className="secondary" style={{ whiteSpace: "normal" }}><Sup text={k} /></td>
                   <td style={{ textAlign: "right" }}>{removed == null ? "" : removed.toLocaleString("en")}</td>
                   <td style={{ textAlign: "right" }}>{left == null ? "…" : left.toLocaleString("en")}</td>
                 </tr>
@@ -254,7 +255,7 @@ export default function InstrumentPage() {
               ].map(([k, v]) => (
                 <div key={k} className="flex gap-4 py-2" style={{ borderBottom: "0.5px solid var(--border)" }}>
                   <dt className="muted" style={{ width: "9em", flex: "none" }}>{k}</dt>
-                  <dd style={{ color: "var(--text-primary)" }}>{v}</dd>
+                  <dd style={{ color: "var(--text-primary)" }}><Sup text={v} /></dd>
                 </div>
               ))}
             </dl>

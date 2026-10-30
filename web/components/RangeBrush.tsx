@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
+import Sup from "./Sup";
 
 const W = 960;
 const H = 140;
@@ -122,7 +123,7 @@ export default function RangeBrush({
         <g key={u}>
           <line x1={x(u)} x2={x(u)} y1={PLOT_H} y2={PLOT_H + 4} stroke="var(--border-strong)" strokeWidth={0.75} />
           <text x={x(u)} y={PLOT_H + 19} textAnchor="middle" fontSize={13} fill="var(--text-secondary)" className="tabular">
-            {tick(inv(u))}
+            <Sup text={tick(inv(u))} svg />
           </text>
         </g>
       ))}

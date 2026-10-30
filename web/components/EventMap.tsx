@@ -8,6 +8,7 @@ import type { Topology } from "topojson-specification";
 import land50 from "world-atlas/land-50m.json";
 import type { Coverage } from "@/lib/coverage";
 import { useMounted } from "@/lib/useMounted";
+import Sup from "./Sup";
 
 export type MapEvent = {
   key: string;
@@ -223,7 +224,7 @@ export default function EventMap({
           {hover.rows.map(([k, v], i) => (
             <div key={i}>
               {k && <span className="muted">{k} </span>}
-              <span className={i === 0 ? "" : "tabular"} style={i === 0 ? { fontWeight: 600 } : undefined}>{v}</span>
+              <span className={i === 0 ? "" : "tabular"} style={i === 0 ? { fontWeight: 600 } : undefined}><Sup text={v} /></span>
             </div>
           ))}
         </div>
