@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { eventHref } from "@/lib/format";
+import { eventHref, lat, lon } from "@/lib/format";
 
 export type Ev = {
   key: string;
@@ -35,13 +35,13 @@ const COLUMNS: { key: Key | null; title: string; unit?: string; num?: boolean; d
 /** 3.3×10⁻⁸ → 底数与指数分开排，指数对齐更好读 */
 function Sci({ x }: { x: number }) {
   if (!x) return <>–</>;
-  const e = Math.floor(Math.log10(x));
-  const m = x / 10 ** e;
+  // toExponential 进位正确：9.96e-8 → 1.0e-7，不会成 10.0×10⁻⁸
+  const [m, e] = x.toExponential(1).split("e").map(Number);
   return (
     <>
       {m.toFixed(1)}
-      <span className="secondary"> × 10</span>
-      <sup style={{ display: "inline-block", minWidth: "2em", textAlign: "left", fontSize: "0.72em" }}>{e}</sup>
+      <span className="secondary">×10</span>
+      <sup style={{ display: "inline-block", minWidth: "2em", textAlign: "left", fontSize: "0.72em" }}>{String(e).replace("-", "−")}</sup>
     </>
   );
 }
@@ -119,9 +119,8 @@ export default function EventTable({ events, caption, showDetector = true }: { e
               <tr key={e.key}>
                 <td>
                   <Link href={eventHref({ name: e.name, cand_id: e.cand })} style={{ fontSize: 16 }}>
-                    {e.name ? `TGF ${e.name}` : "pending"}
+                    {e.name ? `TGF ${e.name}` : "Provisional event"}
                   </Link>
-                  {e.provisional && <span className="badge ml-2">provisional</span>}
                 </td>
                 {showDetector && <td>{e.instrument}</td>}
                 <td>{e.start.slice(0, 10)}</td>
@@ -129,7 +128,7 @@ export default function EventTable({ events, caption, showDetector = true }: { e
                 <td style={{ textAlign: "right" }}>{Math.round(e.duration).toLocaleString("en")}</td>
                 <td style={{ textAlign: "right" }}><Sci x={e.fa} /></td>
                 <td style={{ textAlign: "right" }}>
-                  {Math.abs(e.lat).toFixed(1)}° {e.lat < 0 ? "S" : "N"}, {Math.abs(e.lon).toFixed(1)}° {e.lon < 0 ? "W" : "E"}
+                  {lat(e.lat, 1)}, {lon(e.lon, 1)}
                 </td>
               </tr>
             ))}

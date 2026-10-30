@@ -21,8 +21,8 @@ function superscript(n: number): string {
   return String(n).split("").map((c) => map[c] ?? c).join("");
 }
 
-export const lon = (x: number) => `${Math.abs(x).toFixed(2)}°${x < 0 ? "W" : "E"}`;
-export const lat = (x: number) => `${Math.abs(x).toFixed(2)}°${x < 0 ? "S" : "N"}`;
+export const lon = (x: number, digits = 2) => `${Math.abs(x).toFixed(digits)}°${x < 0 ? "W" : "E"}`;
+export const lat = (x: number, digits = 2) => `${Math.abs(x).toFixed(digits)}°${x < 0 ? "S" : "N"}`;
 
 export const years = (seconds: number) => seconds / (365.25 * 86400);
 

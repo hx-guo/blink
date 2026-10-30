@@ -215,7 +215,7 @@ export default function Home() {
           </h1>
           <p className="mt-6 secondary prose" style={{ maxWidth: "34em", fontSize: 18, lineHeight: 1.6 }}>
             {nFinal.toLocaleString("en")} TGFs found by {index.instruments.map((i) => i.instrument).join(", ")} from {first} to{" "}
-            {last}, updated every hour. Each has a permanent name, its light curves and the exposure of the search.
+            {last}, updated every hour. Each has a permanent name and a page with its light curves and the tests of its selection.
           </p>
           <form
             className="mt-10 flex items-baseline gap-4 flex-wrap"
@@ -313,10 +313,10 @@ export default function Home() {
               {filtered ? (
                 <>
                   <span style={{ color: "var(--accent)" }}>{picked.length.toLocaleString("en")}</span>
-                  <span className="secondary"> of {events.length.toLocaleString("en")} TGFs</span>
+                  <span className="secondary"> of {events.length.toLocaleString("en")} events</span>
                 </>
               ) : (
-                <span className="secondary">All {events.length.toLocaleString("en")} TGFs, newest first</span>
+                <span className="secondary">All {events.length.toLocaleString("en")} events, newest first</span>
               )}
             </p>
             {catalogs && (
