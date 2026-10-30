@@ -7,7 +7,7 @@ import EventMap, { type MapEvent, type Region } from "@/components/EventMap";
 import { COVERAGE } from "@/lib/coverage";
 import EventTable, { type Ev } from "@/components/EventTable";
 import RangeBrush from "@/components/RangeBrush";
-import { ago, Loading } from "@/components/Shell";
+import { ago, Loading, PageLoading } from "@/components/Shell";
 import { BASE, displayName, eventHref, lat as fmtLat, lon as fmtLon, sci } from "@/lib/format";
 
 import type { Catalog, Index } from "@/lib/types";
@@ -162,7 +162,7 @@ export default function Home() {
   const filtered = Object.keys(sels).length > 0 || region != null;
   const highlight = filtered ? new Set(picked.map((e) => e.key)) : null;
 
-  if (!index) return <Loading error={error} what="the catalog index" />;
+  if (!index) return <PageLoading error={error} what="the catalog index" />;
   const many = index.instruments.length > 1;
   const nFinal = index.instruments.reduce((a, i) => a + i.n_final, 0);
   const first = index.instruments.map((i) => i.first_day).sort()[0];

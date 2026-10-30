@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import EventView from "@/components/EventView";
-import { Loading } from "@/components/Shell";
+import { Notice, PageLoading } from "@/components/Shell";
 import { displayName, eventHref, lat, lon, utc } from "@/lib/format";
 import type { EventRecord, Index } from "@/lib/types";
 import { useJson, useParam } from "@/lib/useData";
@@ -13,8 +13,9 @@ export default function CandidatePage() {
   // cand_id 的前缀即仪器 slug
   const slug = id && index?.instruments.find((i) => id.startsWith(`${i.slug}-`))?.slug;
   const { data: event, error } = useJson<EventRecord>(slug ? `${slug}/events/${id}.json` : null);
-  if (id === "") return <p className="secondary pt-14">No candidate given. Find events in the <Link href="/">catalog</Link>.</p>;
-  if (!event) return <Loading error={error} what="the event" />;
+  if (id === "") return <Notice title="No candidate given">The address names no candidate.</Notice>;
+  if (error || (index && !slug)) return <Notice title="No such candidate">{id} is not in the current catalog; a later run may have dropped it.</Notice>;
+  if (!event) return <PageLoading error={null} what="the event" />;
   const head = (
     <>
       <h1 style={{ fontSize: "clamp(32px, 4.2vw, 46px)", lineHeight: 1.12, fontWeight: 400, letterSpacing: "-0.01em" }}>

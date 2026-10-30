@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import EventView from "@/components/EventView";
-import { Loading } from "@/components/Shell";
+import { Notice, PageLoading } from "@/components/Shell";
 import { displayName, eventHref, lat, lon, utc } from "@/lib/format";
 import type { Detection, EventRecord, NameEntry } from "@/lib/types";
 import { useJson, useParam } from "@/lib/useData";
@@ -53,14 +53,15 @@ function DetectionView({ entry, d }: { entry: NameEntry; d: Detection }) {
       </section>
     );
   }
-  return event ? <EventView event={event} head={<Head entry={entry} d={d} />} /> : <Loading error={error} what="the event" />;
+  return event ? <EventView event={event} head={<Head entry={entry} d={d} />} /> : <PageLoading error={error} what="the event" />;
 }
 
 export default function NamePage() {
   const name = useParam("name", "tgf");
   const { data: entry, error } = useJson<NameEntry>(name ? `names/${name}.json` : null);
-  if (name === "") return <p className="secondary pt-14">No name given. Find events in the <Link href="/">catalog</Link>.</p>;
-  if (!entry) return <Loading error={error && `no event named ${name}`} what={name ? displayName(name) : "the event"} />;
+  if (name === "") return <Notice title="No name given">The address names no TGF.</Notice>;
+  if (error) return <Notice title={`No TGF is named ${name}`}>Names look like 240106AA: the UTC date of the peak and two letters.</Notice>;
+  if (!entry) return <PageLoading error={null} what={name ? displayName(name) : "the event"} />;
   return (
     <div className="flex flex-col" style={{ gap: 88 }}>
       <title>{`${displayName(entry.name)} · TGF Catalog`}</title>

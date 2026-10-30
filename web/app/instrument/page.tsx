@@ -3,7 +3,7 @@
 import Link from "next/link";
 import Bars, { type Bin } from "@/components/Bars";
 import RateMap, { type RateCell } from "@/components/RateMap";
-import { Loading } from "@/components/Shell";
+import { Loading, Notice, PageLoading } from "@/components/Shell";
 import { sci, utc, years } from "@/lib/format";
 import type { Index } from "@/lib/types";
 import { useJson, useParam } from "@/lib/useData";
@@ -101,8 +101,8 @@ export default function InstrumentPage() {
   const catalogs = useCatalogs(slug ? [slug] : []);
   const { data: exposure } = useJson<Exposure>(slug ? `${slug}/exposure.json` : null);
   const inst = index?.instruments.find((i) => i.slug === slug);
-  if (!index) return <Loading error={error} what="the catalog index" />;
-  if (!inst) return <p className="secondary">Unknown instrument.</p>;
+  if (!index) return <PageLoading error={error} what="the catalog index" />;
+  if (!inst) return <Notice title="No such instrument">{slug ? `${slug} is not` : "The address names no instrument"}{slug ? " among the instruments of the catalog." : "."}</Notice>;
   const cat = catalogs?.[0];
   const c = manifest?.counts;
   const sel = manifest?.selection;

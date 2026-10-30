@@ -10,6 +10,7 @@ import { useJson } from "@/lib/useData";
 export function ago(t: string): string {
   const h = (Date.now() - Date.parse(t)) / 3.6e6;
   if (h < 1) return "within the hour";
+  if (h < 1.5) return "an hour ago";
   if (h < 48) return `${Math.round(h)} hours ago`;
   return `${Math.round(h / 24)} days ago`;
 }
@@ -75,6 +76,32 @@ export function Footer() {
         </span>
       </div>
     </footer>
+  );
+}
+
+/** 整页的提示（找不到、出错），与页面开头同一版式：标题、一句话、回目录的链接 */
+export function Notice({ title, children }: { title: string; children?: React.ReactNode }) {
+  return (
+    <section className="margin-grid pt-14 pb-10">
+      <div />
+      <div>
+        <h1 style={{ fontSize: "clamp(28px, 3.4vw, 36px)", lineHeight: 1.15, fontWeight: 400 }}>{title}</h1>
+        <p className="mt-5 secondary prose" style={{ maxWidth: "34em", fontSize: 17, lineHeight: 1.6 }}>
+          {children} Find events in the <Link href="/">catalog</Link>.
+        </p>
+      </div>
+    </section>
+  );
+}
+
+/** 整页在取数据时：同一位置一行淡字，出错时换成 Notice */
+export function PageLoading({ error, what }: { error: string | null; what: string }) {
+  if (error) return <Notice title={`Could not load ${what}`}>The server answered: {error}.</Notice>;
+  return (
+    <section className="margin-grid pt-14">
+      <div />
+      <p className="muted">Loading {what}…</p>
+    </section>
   );
 }
 
