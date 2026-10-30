@@ -8,6 +8,32 @@ const W = 960;
 const PLOT_H = 112;
 const DAY = 86400000;
 
+/** 时间轴：每年 1 月 1 日 */
+function yearTicks(lo: number, hi: number): number[] {
+  const out: number[] = [];
+  for (let y = new Date(lo).getUTCFullYear() + 1; Date.UTC(y, 0, 1) < hi; y++) out.push(Date.UTC(y, 0, 1));
+  return out;
+}
+
+/**
+ * 对数轴（log10 单位）：先试 1、2、5 倍，再试 1、3 倍，再试 1 倍，再按 1、2、5、10… 个数量级一跳，取第一个
+ * 不超过 `max` 个的。时长跨不到两个数量级，标 20 µs…1 ms；虚警率跨两百个，十几个数量级一标。
+ */
+function logTicks(lo: number, hi: number, max: number): number[] {
+  const within = (u: number) => u >= lo - 1e-9 && u <= hi + 1e-9;
+  for (const mantissas of [[1, 2, 5], [1, 3], [1]]) {
+    const out: number[] = [];
+    for (let e = Math.floor(lo); e <= Math.ceil(hi); e++) for (const m of mantissas) if (within(e + Math.log10(m))) out.push(e + Math.log10(m));
+    if (out.length <= max) return out;
+  }
+  for (const step of [2, 5, 10, 20, 25, 50, 100]) {
+    const out: number[] = [];
+    for (let e = Math.ceil(lo / step) * step; e <= hi; e += step) out.push(e);
+    if (out.length <= max) return out;
+  }
+  return [Math.ceil(lo), Math.floor(hi)];
+}
+
 /**
  * 范围选择：事件按所选量的直方图，按住拖动选一段，点一下选中那一根柱子。时间按 UTC 日取整，
  * 对数量（时长、虚警率）在 log10 上分箱与选取。`selection` 用原始单位（毫秒或原值）。
@@ -35,7 +61,7 @@ export default function RangeBrush({
   const t = (v: number) => (kind === "log" ? Math.log10(v) : v);
   const inv = (u: number) => (kind === "log" ? 10 ** u : u);
 
-  const { lo, hi, counts, ticks } = useMemo(() => {
+  const { lo, hi, counts } = useMemo(() => {
     const ts = values.map(t).filter(Number.isFinite);
     let lo = Math.min(...ts), hi = Math.max(...ts);
     if (kind === "time") {
@@ -47,18 +73,11 @@ export default function RangeBrush({
     }
     const counts = new Array(bins).fill(0);
     for (const u of ts) counts[Math.min(bins - 1, Math.floor(((u - lo) / (hi - lo)) * bins))]++;
-    const ticks: number[] = [];
-    if (kind === "time") {
-      for (let y = new Date(lo).getUTCFullYear() + 1; Date.UTC(y, 0, 1) < hi; y++) ticks.push(Date.UTC(y, 0, 1));
-    } else {
-      const span = Math.ceil(hi) - Math.floor(lo);
-      const step = span > 40 ? 10 : span > 16 ? 5 : span > 8 ? 2 : 1;
-      for (let e = Math.ceil(lo / step) * step; e <= hi; e += step) ticks.push(e);
-    }
-    return { lo, hi, counts, ticks };
+    return { lo, hi, counts };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [values, kind, bins]);
 
+  const ticks = kind === "time" ? yearTicks(lo, hi) : logTicks(lo, hi, Math.max(3, Math.floor(W / k / 75)));
   const x = (u: number) => ((u - lo) / (hi - lo)) * W;
   const uAt = (clientX: number) => {
     const r = svgRef.current!.getBoundingClientRect();
@@ -125,7 +144,8 @@ export default function RangeBrush({
         {ticks.map((u) => (
           <g key={u}>
             <line x1={x(u)} x2={x(u)} y1={PLOT_H} y2={PLOT_H + 4 * k} stroke="var(--border-strong)" strokeWidth={0.75 * k} />
-            <text x={x(u)} y={PLOT_H + 19 * k} textAnchor="middle" fontSize={13 * k} fill="var(--text-secondary)" className="tabular">
+            {/* 落在两端的标签向里对齐，不伸出图外 */}
+            <text x={x(u)} y={PLOT_H + 19 * k} textAnchor={x(u) < 30 * k ? "start" : x(u) > W - 30 * k ? "end" : "middle"} fontSize={13 * k} fill="var(--text-secondary)" className="tabular">
               <Sup text={tick(inv(u))} svg />
             </text>
           </g>
