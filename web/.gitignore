@@ -42,4 +42,5 @@ next-env.d.ts
 
 # pipeline data (blink export) and demo inputs
 /public/data
+/public/THIRD-PARTY-NOTICES.txt
 /.demo

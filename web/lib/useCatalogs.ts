@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { BASE } from "./format";
 import type { Catalog } from "./types";
+import { getJson } from "./useData";
 
 /** 运行时取各仪器的列式目录（几百 KB 到几 MB，不塞进 HTML） */
 export function useCatalogs(slugs: string[]): Catalog[] | null {
@@ -11,7 +11,7 @@ export function useCatalogs(slugs: string[]): Catalog[] | null {
   useEffect(() => {
     let alive = true;
     Promise.all(
-      key.split(",").filter(Boolean).map((s) => fetch(`${BASE}/data/${s}/catalog.json`).then((r) => r.json() as Promise<Catalog>)),
+      key.split(",").filter(Boolean).map((s) => getJson<Catalog>(`${s}/catalog.json`)),
     ).then((c) => alive && setCatalogs(c));
     return () => {
       alive = false;
