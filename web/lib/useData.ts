@@ -5,6 +5,19 @@ import { BASE } from "./format";
 
 export type Loaded<T> = { data: T | null; error: string | null };
 
+/** 同一个文件正在取时，后来的调用等同一次请求（页头和页面都要 index.json） */
+const inflight = new Map<string, Promise<unknown>>();
+export function getJson<T>(path: string): Promise<T> {
+  let p = inflight.get(path);
+  if (!p) {
+    p = fetch(`${BASE}/data/${path}`, { cache: "no-cache" })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`${r.status} ${path}`))))
+      .finally(() => inflight.delete(path));
+    inflight.set(path, p);
+  }
+  return p as Promise<T>;
+}
+
 /**
  * 运行时取 `blink export` 写出的 JSON（相对 data/）。网页外壳构建时不读数据，
  * 管线更新数据文件即可，无需重建站点。数据每小时更新：`no-cache` 让浏览器每次向服务器确认
@@ -16,8 +29,7 @@ export function useJson<T>(path: string | null): Loaded<T> {
   useEffect(() => {
     if (!path) return;
     let alive = true;
-    fetch(`${BASE}/data/${path}`, { cache: "no-cache" })
-      .then((r) => (r.ok ? (r.json() as Promise<T>) : Promise.reject(new Error(`${r.status} ${path}`))))
+    getJson<T>(path)
       .then((data) => alive && setState({ path, data, error: null }))
       .catch((e: Error) => alive && setState({ path, data: null, error: e.message }));
     return () => {
