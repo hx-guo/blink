@@ -105,9 +105,10 @@ export default function RangeBrush({
         return (
           <rect
             key={k}
-            x={k * binW + binW * 0.22}
+            x={k * binW}
             y={PLOT_H - h}
-            width={Math.max(0.5, binW * 0.56)}
+            width={binW}
+            shapeRendering="crispEdges"
             height={h}
             fill={shown && inSel(k) ? "var(--accent)" : "var(--ink)"}
             opacity={shown ? (inSel(k) ? 0.85 : 0.18) : 0.42}

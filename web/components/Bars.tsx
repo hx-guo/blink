@@ -8,7 +8,7 @@ import { useWidth } from "@/lib/useWidth";
 export type Bin = { label: string; value: number; err?: number; tick?: string; detail?: string };
 
 /**
- * 单系列柱状图，与首页直方图同一笔法：墨色细柱、底线与外向刻度、淡网格。按容器的像素宽度画，
+ * 直方图，与首页直方图同一笔法：墨色、箱与箱紧挨、底线与外向刻度、淡网格。按容器的像素宽度画，
  * 字号不随缩放变小。y 轴从 0 到数据的最大值（含误差）取整。
  */
 export default function Bars({
@@ -34,8 +34,9 @@ export default function Bars({
   const top = Math.max(...bins.map((b) => b.value + (b.err ?? 0)));
   const y = scaleLinear().domain([0, top > 0 ? top : 1]).nice(4).range([height - M.bottom, M.top]);
   const step = (W - M.left - M.right) / Math.max(1, bins.length);
-  const barW = Math.max(1, step * 0.62);
-  const x = (i: number) => M.left + i * step + (step - barW) / 2;
+  // 直方图：相邻箱紧挨着，柱宽即箱宽
+  const barW = step;
+  const x = (i: number) => M.left + i * step;
 
   return (
     <div ref={ref} className="relative">
@@ -54,7 +55,7 @@ export default function Bars({
           return (
             <g key={i} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}>
               <rect x={M.left + i * step} y={M.top} width={step} height={height - M.top - M.bottom} fill="transparent" />
-              {h > 0 && <rect x={x(i)} y={y(b.value)} width={barW} height={h} fill={hover === i ? "var(--accent)" : "var(--ink)"} opacity={on ? 0.55 : 0.3} />}
+              {h > 0 && <rect x={x(i)} y={y(b.value)} width={barW} height={h} shapeRendering="crispEdges" fill={hover === i ? "var(--accent)" : "var(--ink)"} opacity={on ? 0.55 : 0.3} />}
               {b.err != null && b.err > 0 && (
                 <line
                   x1={x(i) + barW / 2}
