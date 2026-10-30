@@ -104,20 +104,20 @@ export default function RangeBrush({
           setDrag(null);
         }}
       >
-        {counts.map((c, k) => {
+        {counts.map((c, j) => {
           const h = c ? Math.max(1.5, (c / maxCount) * (PLOT_H - 6)) : 0;
           return (
             <rect
-              key={k}
-              x={k * binW}
+              key={j}
+              x={j * binW}
               y={PLOT_H - h}
               width={binW}
               shapeRendering="crispEdges"
               height={h}
-              fill={shown && inSel(k) ? "var(--accent)" : "var(--ink)"}
-              opacity={shown ? (inSel(k) ? 0.85 : 0.18) : 0.42}
+              fill={shown && inSel(j) ? "var(--accent)" : "var(--ink)"}
+              opacity={shown ? (inSel(j) ? 0.85 : 0.18) : 0.42}
             >
-              <title>{`${c} TGFs, ${tick(inv(lo + (k * (hi - lo)) / bins))} – ${tick(inv(lo + ((k + 1) * (hi - lo)) / bins))}`}</title>
+              <title>{`${c} TGFs, ${tick(inv(lo + (j * (hi - lo)) / bins))} – ${tick(inv(lo + ((j + 1) * (hi - lo)) / bins))}`}</title>
             </rect>
           );
         })}

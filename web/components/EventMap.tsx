@@ -6,7 +6,7 @@ import { useMemo, useRef, useState } from "react";
 import { feature } from "topojson-client";
 import type { Topology } from "topojson-specification";
 import land50 from "world-atlas/land-50m.json";
-import type { Coverage } from "@/lib/coverage";
+import { LAT_TICKS, MAP_LAT, type Coverage } from "@/lib/coverage";
 import { useMounted } from "@/lib/useMounted";
 import { useViewScale } from "@/lib/useWidth";
 import Sup from "./Sup";
@@ -23,9 +23,9 @@ export type MapEvent = {
 const W = 960;
 /** 图框外留给刻度标签的边 */
 const ML = 44, MB = 26, MT = 1, MR = 1;
-/** 画到的纬度范围：TGF 只在中低纬，高纬只留一点陆地作参照 */
-const LAT_MIN = -60;
-const LAT_MAX = 70;
+/** 纬度范围由轨道倾角定（lib/coverage.ts） */
+const LAT_MIN = -MAP_LAT;
+const LAT_MAX = MAP_LAT;
 const PW = W - ML - MR;
 const PH = Math.round((PW / 360) * (LAT_MAX - LAT_MIN));
 /** 挂载前占位的高度 */
@@ -72,7 +72,7 @@ export default function EventMap({
     const path = geoPath(projection).digits(1);
     const lines: string[] = [];
     for (let l = -150; l <= 150; l += 30) lines.push(path({ type: "LineString", coordinates: [[l, LAT_MIN], [l, 0], [l, LAT_MAX]] }) ?? "");
-    for (let l = -60; l <= 60; l += 30) lines.push(path({ type: "LineString", coordinates: [[-180, l], [0, l], [180, l]] }) ?? "");
+    for (const l of LAT_TICKS) lines.push(path({ type: "LineString", coordinates: [[-180, l], [0, l], [180, l]] }) ?? "");
     return {
       projection,
       land: path(feature(topo, topo.objects.land as never)) ?? "",
@@ -141,11 +141,11 @@ export default function EventMap({
             <clipPath id="map-frame">
               <rect x={ML} y={MT} width={PW} height={PH} />
             </clipPath>
-            {coverage.map((c, k) => {
+            {coverage.map((c, j) => {
               const [, yN] = xy(0, c.inclination);
               const [, yS] = xy(0, -c.inclination);
               return (
-                <mask key={k} id={`coverage-${k}`} maskUnits="userSpaceOnUse" x={ML} y={MT} width={PW} height={PH}>
+                <mask key={j} id={`coverage-${j}`} maskUnits="userSpaceOnUse" x={ML} y={MT} width={PW} height={PH}>
                   <rect x={ML} y={yN} width={PW} height={yS - yN} fill="white" />
                   <path d={polygon(c.saa)} fill="black" />
                 </mask>
@@ -153,8 +153,8 @@ export default function EventMap({
             })}
           </defs>
           <g clipPath="url(#map-frame)">
-            {coverage.map((_, k) => (
-              <rect key={k} x={ML} y={MT} width={PW} height={PH} fill="var(--exposure)" mask={`url(#coverage-${k})`} />
+            {coverage.map((_, j) => (
+              <rect key={j} x={ML} y={MT} width={PW} height={PH} fill="var(--exposure)" mask={`url(#coverage-${j})`} />
             ))}
             <path d={graticule} fill="none" stroke="var(--axis)" strokeWidth={0.35} strokeOpacity={0.6} />
             <path d={land} fill="none" stroke="var(--land)" strokeWidth={0.55} strokeOpacity={0.55} />
@@ -205,7 +205,7 @@ export default function EventMap({
               </g>
             );
           })}
-          {[-30, 0, 30, 60].map((l) => {
+          {LAT_TICKS.map((l) => {
             const [, y] = xy(0, l);
             return (
               <g key={l}>

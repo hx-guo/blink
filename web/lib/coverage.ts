@@ -19,3 +19,9 @@ export const COVERAGE: Record<string, Coverage> = {
     ],
   },
 };
+
+/** 地图的纬度范围：各仪器最大倾角外留 2°，边缘的点画得全、覆盖区的边看得见 */
+export const MAP_LAT = Math.max(...Object.values(COVERAGE).map((c) => c.inclination)) + 2;
+
+/** 纬度刻度：每 20°，在图框以内 */
+export const LAT_TICKS = Array.from({ length: 2 * Math.floor(MAP_LAT / 20) + 1 }, (_, i) => (i - Math.floor(MAP_LAT / 20)) * 20);

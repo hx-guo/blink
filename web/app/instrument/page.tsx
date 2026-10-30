@@ -4,6 +4,7 @@ import Link from "next/link";
 import Bars, { type Bin } from "@/components/Bars";
 import RateMap, { type RateCell } from "@/components/RateMap";
 import { Loading, Notice, PageLoading } from "@/components/Shell";
+import { COVERAGE } from "@/lib/coverage";
 import { sci, utc, years } from "@/lib/format";
 import type { Index } from "@/lib/types";
 import { useJson, useParam } from "@/lib/useData";
@@ -163,10 +164,10 @@ export default function InstrumentPage() {
         <header className="margin-note caption">
           <h2 className="section-title mb-3">Rate</h2>
           <p>Confirmed TGFs divided by the live time of the search at the same place or time: the rate does not depend on where the satellite spends its time.</p>
-          <p className="mt-3">Blank cells had less than a day of live time: the South Atlantic Anomaly, where the detectors are off, and the edges of the orbit.</p>
+          <p className="mt-3">Hatched: the South Atlantic Anomaly, where the detectors are switched off. Cells with less than a day of live time are left blank.</p>
         </header>
         <div className="flex flex-col gap-14">
-          {exposure && cat ? <RateMap cells={rateCells(exposure, fLon, fLat)} minHours={24} /> : <Loading error={null} what="the exposure" />}
+          {exposure && cat ? <RateMap cells={rateCells(exposure, fLon, fLat)} minHours={24} saa={COVERAGE[inst.instrument]?.saa} /> : <Loading error={null} what="the exposure" />}
           {exposure && cat && (
             <div className="grid grid-cols-1 gap-12 lg:grid-cols-2">
               <Chart title="By latitude, TGFs per hour">

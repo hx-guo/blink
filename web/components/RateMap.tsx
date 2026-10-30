@@ -7,14 +7,14 @@ import type { Topology } from "topojson-specification";
 import land50 from "world-atlas/land-50m.json";
 import { useMounted } from "@/lib/useMounted";
 import { useViewScale } from "@/lib/useWidth";
+import { LAT_TICKS, MAP_LAT } from "@/lib/coverage";
 
 export type RateCell = { lat0: number; lon0: number; size: number; events: number; hours: number };
 
 const W = 960;
 const ML = 44, MB = 26, MT = 1, MR = 1;
-/** 轨道倾角 43°，率图只画到 ±50° */
-const LAT_MIN = -50;
-const LAT_MAX = 50;
+const LAT_MIN = -MAP_LAT;
+const LAT_MAX = MAP_LAT;
 const PW = W - ML - MR;
 const PH = Math.round((PW / 360) * (LAT_MAX - LAT_MIN));
 
@@ -29,9 +29,9 @@ const latLabel = (l: number) => (l === 0 ? "0°" : `${Math.abs(l)}°${l < 0 ? "S
 
 /**
  * 每格 TGF 数 / 该格的搜索活时间（小时），与首页地图同一图框与刻度。活时间不足 `minHours`
- * 的格不画（SAA 与轨道边缘），那里的率没有意义。
+ * 的格不画，那里的率没有意义。SAA 多边形画斜线，同论文的图：空白处一眼分得清是探测器关机。
  */
-export default function RateMap({ cells, minHours }: { cells: RateCell[]; minHours: number }) {
+export default function RateMap({ cells, minHours, saa }: { cells: RateCell[]; minHours: number; saa?: [number, number][] }) {
   const mounted = useMounted();
   const [scaleRef, k] = useViewScale<HTMLDivElement>(PW + MR);
   const [hover, setHover] = useState<RateCell | null>(null);
@@ -59,6 +59,10 @@ export default function RateMap({ cells, minHours }: { cells: RateCell[]; minHou
             <clipPath id="rate-frame">
               <rect x={ML} y={MT} width={PW} height={PH} />
             </clipPath>
+            {/* 斜线间距按屏幕像素定（约 5 px），窄屏上不挤成一片 */}
+            <pattern id="saa-hatch" patternUnits="userSpaceOnUse" width={5 * k} height={5 * k} patternTransform="rotate(45)">
+              <line x1={0} y1={0} x2={0} y2={5 * k} stroke="var(--text-muted)" strokeWidth={0.6 * k} strokeOpacity={0.7} />
+            </pattern>
           </defs>
           <g clipPath="url(#rate-frame)">
             {shown.map((c, i) => {
@@ -77,6 +81,15 @@ export default function RateMap({ cells, minHours }: { cells: RateCell[]; minHou
                 />
               );
             })}
+            {saa && (
+              <path
+                d={`M${saa.map(([lo, la]) => xy(lo, la).map((v) => v.toFixed(1)).join(",")).join("L")}Z`}
+                fill="url(#saa-hatch)"
+                stroke="var(--text-muted)"
+                strokeWidth={0.75 * k}
+                pointerEvents="none"
+              />
+            )}
             {/* 海岸线：纸色衬底上一道墨线，深浅格上都看得见 */}
             <path d={land} fill="none" stroke="var(--page)" strokeWidth={1.8} strokeOpacity={0.8} pointerEvents="none" />
             <path d={land} fill="none" stroke="var(--ink)" strokeWidth={0.6} strokeOpacity={0.8} pointerEvents="none" />
@@ -96,7 +109,7 @@ export default function RateMap({ cells, minHours }: { cells: RateCell[]; minHou
               </g>
             );
           })}
-          {[-40, -20, 0, 20, 40].map((l) => {
+          {LAT_TICKS.map((l) => {
             const [, y] = xy(0, l);
             return (
               <g key={l}>
@@ -126,16 +139,29 @@ export default function RateMap({ cells, minHours }: { cells: RateCell[]; minHou
       <div className="flex items-start gap-4 caption mt-4 flex-wrap">
         <span>TGFs per hour of exposure</span>
         <svg width={INK.length * 40 + 20} height={34} aria-hidden>
-          {INK.map((_, k) => (
-            <rect key={k} x={10 + k * 40} y={2} width={40} height={10} fill={shade(k)} />
+          {INK.map((_, j) => (
+            <rect key={j} x={10 + j * 40} y={2} width={40} height={10} fill={shade(j)} />
           ))}
-          {STEPS.map((s, k) => (
+          {STEPS.map((s, j) => (
             <g key={s}>
-              <line x1={10 + (k + 1) * 40} x2={10 + (k + 1) * 40} y1={12} y2={16} stroke="var(--border-strong)" strokeWidth={0.75 * k} />
-              <text x={10 + (k + 1) * 40} y={29} textAnchor="middle" fontSize={13} fill="var(--text-secondary)" className="tabular">{s}</text>
+              <line x1={10 + (j + 1) * 40} x2={10 + (j + 1) * 40} y1={12} y2={16} stroke="var(--border-strong)" strokeWidth={0.75} />
+              <text x={10 + (j + 1) * 40} y={29} textAnchor="middle" fontSize={13} fill="var(--text-secondary)" className="tabular">{s}</text>
             </g>
           ))}
         </svg>
+        {saa && (
+          <span className="flex items-start gap-2">
+            <svg width={30} height={14} aria-hidden>
+              <defs>
+                <pattern id="saa-hatch-key" patternUnits="userSpaceOnUse" width={5} height={5} patternTransform="rotate(45)">
+                  <line x1={0} y1={0} x2={0} y2={5} stroke="var(--text-muted)" strokeWidth={0.6} strokeOpacity={0.7} />
+                </pattern>
+              </defs>
+              <rect x={0.5} y={2.5} width={29} height={10} fill="url(#saa-hatch-key)" stroke="var(--text-muted)" strokeWidth={0.75} />
+            </svg>
+            <span>South Atlantic Anomaly, detectors off</span>
+          </span>
+        )}
       </div>
     </div>
   );

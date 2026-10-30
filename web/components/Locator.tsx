@@ -5,14 +5,14 @@ import { useMemo } from "react";
 import { feature } from "topojson-client";
 import type { Topology } from "topojson-specification";
 import land50 from "world-atlas/land-50m.json";
-import type { Coverage } from "@/lib/coverage";
+import { LAT_TICKS, MAP_LAT, type Coverage } from "@/lib/coverage";
 import { useMounted } from "@/lib/useMounted";
 import { useViewScale } from "@/lib/useWidth";
 
 const W = 960;
 const ML = 44, MB = 26, MT = 1, MR = 1;
-const LAT_MIN = -60;
-const LAT_MAX = 70;
+const LAT_MIN = -MAP_LAT;
+const LAT_MAX = MAP_LAT;
 const PW = W - ML - MR;
 const PH = Math.round((PW / 360) * (LAT_MAX - LAT_MIN));
 
@@ -65,7 +65,7 @@ export default function Locator({ lon, lat, coverage }: { lon: number; lat: numb
               <text x={xy(l, 0)[0]} y={MT + PH + 19 * k} textAnchor="middle" fontSize={13 * k} fill="var(--text-secondary)">{lonLabel(l)}</text>
             </g>
           ))}
-          {[-30, 0, 30, 60].map((l) => (
+          {LAT_TICKS.map((l) => (
             <g key={l}>
               <line x1={ML - 4 * k} x2={ML} y1={xy(0, l)[1]} y2={xy(0, l)[1]} stroke="var(--border-strong)" strokeWidth={0.75 * k} />
               <text x={ML - 8 * k} y={xy(0, l)[1]} dy="0.35em" textAnchor="end" fontSize={13 * k} fill="var(--text-secondary)">{latLabel(l)}</text>
