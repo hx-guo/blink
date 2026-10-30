@@ -1,3 +1,5 @@
+import { BASE } from "@/lib/format";
+
 export const metadata = { title: "About · TGF Catalog" };
 
 /** catalog.csv 的列，顺序同文件 */
@@ -111,6 +113,18 @@ export default function About() {
         </table>
       </section>
 
+
+      <Section title="Credits">
+        <p>
+          Type is Source Serif 4 by Frank Grießhammer for Adobe, under the SIL Open Font License. Coastlines are from
+          Natural Earth, in the public domain. The pages are built with React, Next.js, D3 and TopoJSON, under the MIT
+          and ISC licenses.
+        </p>
+        <p>
+          The copyright notices and license texts of everything the site sends to the browser are in{" "}
+          <a href={`${BASE}/THIRD-PARTY-NOTICES.txt`}>THIRD-PARTY-NOTICES.txt</a>.
+        </p>
+      </Section>
     </article>
   );
 }

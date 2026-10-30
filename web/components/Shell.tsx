@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { site } from "@/site.config";
-import { instrumentHref, utc } from "@/lib/format";
+import { BASE, instrumentHref, utc } from "@/lib/format";
 import type { Index } from "@/lib/types";
 import { useJson } from "@/lib/useData";
 
@@ -65,6 +65,8 @@ export function Footer() {
       <div className="pt-3 flex flex-wrap justify-between gap-4 caption" style={{ borderTop: "0.5px solid var(--border-strong)" }}>
         <span>
           <Link href="/about/">About the catalog</Link>
+          <span className="muted"> · </span>
+          <a href={`${BASE}/THIRD-PARTY-NOTICES.txt`}>Third-party notices</a>
           {index && <span className="muted"> · pipeline {index.instruments.map((i) => i.blink_git).join(", ")}</span>}
         </span>
         <span className="flex gap-6">
