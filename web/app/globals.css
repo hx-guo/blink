@@ -30,7 +30,7 @@
   --surface: #f5f2ea;
   --text-primary: #1c1b19;
   --text-secondary: #54504a;
-  --text-muted: #8b867d;
+  --text-muted: #716c64; /* 纸色上 4.7:1，过 WCAG AA */
   --grid: #e3ded3;
   --axis: #a49e92;
   --border: #dcd6ca;
@@ -134,15 +134,20 @@ h2 {
 .caption .tabular {
   font-variant-numeric: tabular-nums lining-nums;
 }
+:focus-visible {
+  outline: 1.5px solid var(--accent);
+  outline-offset: 3px;
+}
 ::selection {
   background: var(--accent-soft);
 }
 a {
   color: var(--link);
   text-decoration: underline;
-  text-decoration-thickness: 0.5px;
+  /* 链接与正文同色，只靠下划线认出：下划线用 muted 色（过 3:1） */
+  text-decoration-thickness: 1px;
   text-underline-offset: 3px;
-  text-decoration-color: var(--axis);
+  text-decoration-color: var(--text-muted);
 }
 a:hover {
   text-decoration-color: var(--accent);
@@ -240,7 +245,7 @@ input.field {
   background: transparent;
   color: var(--text-primary);
   border: none;
-  border-bottom: 0.5px solid var(--axis);
+  border-bottom: 1px solid var(--text-muted);
   padding: 1px 2px;
   font: inherit;
   font-size: 15px;
@@ -291,7 +296,7 @@ input.field:focus {
   background: transparent;
   color: var(--text-primary);
   border: none;
-  border-bottom: 0.5px solid var(--axis);
+  border-bottom: 1px solid var(--text-muted);
   padding: 1px 2px;
   font: inherit;
   font-size: 14px;
@@ -368,6 +373,13 @@ table.events th .unit {
   text-transform: none;
   letter-spacing: 0;
   color: var(--text-muted);
+}
+table.events th .th-sort {
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  cursor: pointer;
 }
 table.events th .sort {
   color: var(--accent);

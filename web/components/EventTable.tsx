@@ -94,13 +94,22 @@ export default function EventTable({ events, caption, showDetector = true }: { e
               {columns.map((c) => (
                 <th
                   key={c.title}
-                  style={{ cursor: c.key ? "pointer" : "default", textAlign: c.num ? "right" : "left" }}
+                  style={{ textAlign: c.num ? "right" : "left" }}
                   aria-sort={c.key && sort.key === c.key ? (sort.desc ? "descending" : "ascending") : undefined}
-                  onClick={() => c.key && setSort((s) => ({ key: c.key!, desc: s.key === c.key ? !s.desc : true }))}
                 >
-                  {c.title}
-                  {c.unit && <span className="unit"> {c.unit}</span>}
-                  <span className="sort">{c.key && sort.key === c.key ? (sort.desc ? " ↓" : " ↑") : ""}</span>
+                  {/* 可排序的列头是按钮：键盘也能排序 */}
+                  {c.key ? (
+                    <button className="th-sort" onClick={() => setSort((s) => ({ key: c.key!, desc: s.key === c.key ? !s.desc : true }))}>
+                      {c.title}
+                      {c.unit && <span className="unit"> {c.unit}</span>}
+                      <span className="sort">{sort.key === c.key ? (sort.desc ? " ↓" : " ↑") : ""}</span>
+                    </button>
+                  ) : (
+                    <>
+                      {c.title}
+                      {c.unit && <span className="unit"> {c.unit}</span>}
+                    </>
+                  )}
                 </th>
               ))}
             </tr>
