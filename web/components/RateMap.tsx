@@ -24,12 +24,41 @@ const INK = [6, 16, 28, 42, 58, 74, 90];
 const shade = (k: number) => `color-mix(in oklab, var(--ink) ${INK[k]}%, var(--page))`;
 const classOf = (r: number) => STEPS.filter((s) => r >= s).length;
 
+/** 点在多边形内（射线法） */
+function inside([x, y]: [number, number], poly: [number, number][]): boolean {
+  let hit = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i];
+    const [xj, yj] = poly[j];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) hit = !hit;
+  }
+  return hit;
+}
+
+/**
+ * SAA 按格子画，同论文：中心落在多边形里的格子，[格西沿经度 −180..180, 格下沿纬度]；
+ * 外轮廓是格子与非 SAA 格之间的边，阶梯状。
+ */
+function saaCells(poly: [number, number][], d: number) {
+  const cells: [number, number][] = [];
+  for (let lat = -90; lat < 90; lat += d) for (let lon = -180; lon < 180; lon += d) if (inside([lon + d / 2, lat + d / 2], poly)) cells.push([lon, lat]);
+  const has = new Set(cells.map(([lo, la]) => `${lo},${la}`));
+  const edges: [number, number, number, number][] = [];
+  for (const [lo, la] of cells) {
+    if (!has.has(`${lo},${la + d}`)) edges.push([lo, la + d, lo + d, la + d]);
+    if (!has.has(`${lo},${la - d}`)) edges.push([lo, la, lo + d, la]);
+    if (!has.has(`${lo - d},${la}`)) edges.push([lo, la, lo, la + d]);
+    if (!has.has(`${lo + d},${la}`)) edges.push([lo + d, la, lo + d, la + d]);
+  }
+  return { cells, edges };
+}
+
 const lonLabel = (l: number) => (l === 0 || Math.abs(l) === 180 ? `${Math.abs(l)}°` : `${Math.abs(l)}°${l < 0 ? "W" : "E"}`);
 const latLabel = (l: number) => (l === 0 ? "0°" : `${Math.abs(l)}°${l < 0 ? "S" : "N"}`);
 
 /**
  * 每格 TGF 数 / 该格的搜索活时间（小时），与首页地图同一图框与刻度。活时间不足 `minHours`
- * 的格不画，那里的率没有意义。SAA 多边形画斜线，同论文的图：空白处一眼分得清是探测器关机。
+ * 的格不画，那里的率没有意义。SAA 的格子画斜线，同论文的图：空白处一眼分得清是探测器关机。
  */
 export default function RateMap({ cells, minHours, saa }: { cells: RateCell[]; minHours: number; saa?: [number, number][] }) {
   const mounted = useMounted();
@@ -46,6 +75,7 @@ export default function RateMap({ cells, minHours, saa }: { cells: RateCell[]; m
   if (!mounted) return <div ref={scaleRef} style={{ aspectRatio: `${PW + MR} / ${H + 40}` }} />;
 
   const xy = (lon: number, lat: number) => projection([lon, lat]) ?? [0, 0];
+  const saaGrid = saa && cells.length ? saaCells(saa, cells[0].size) : null;
   const west = (c: RateCell) => (c.lon0 >= 180 ? c.lon0 - 360 : c.lon0);
   const shown = cells.filter((c) => c.hours >= minHours && c.lat0 + c.size > LAT_MIN && c.lat0 < LAT_MAX);
   const hoverXY = hover ? xy(west(hover) + hover.size / 2, hover.lat0 + hover.size / 2) : null;
@@ -81,14 +111,32 @@ export default function RateMap({ cells, minHours, saa }: { cells: RateCell[]; m
                 />
               );
             })}
-            {saa && (
-              <path
-                d={`M${saa.map(([lo, la]) => xy(lo, la).map((v) => v.toFixed(1)).join(",")).join("L")}Z`}
-                fill="url(#saa-hatch)"
-                stroke="var(--text-muted)"
-                strokeWidth={0.75 * k}
-                pointerEvents="none"
-              />
+            {saaGrid && (
+              <g pointerEvents="none">
+                <path
+                  d={saaGrid.cells
+                    .map(([lo, la]) => {
+                      const [x0, y0] = xy(lo, la + cells[0].size);
+                      const [x1, y1] = xy(lo + cells[0].size, la);
+                      return `M${x0.toFixed(1)},${y0.toFixed(1)}H${x1.toFixed(1)}V${y1.toFixed(1)}H${x0.toFixed(1)}Z`;
+                    })
+                    .join("")}
+                  fill="url(#saa-hatch)"
+                />
+                <path
+                  d={saaGrid.edges
+                    .map(([lo0, la0, lo1, la1]) => {
+                      const [x0, y0] = xy(lo0, la0);
+                      const [x1, y1] = xy(lo1, la1);
+                      return `M${x0.toFixed(1)},${y0.toFixed(1)}L${x1.toFixed(1)},${y1.toFixed(1)}`;
+                    })
+                    .join("")}
+                  fill="none"
+                  stroke="var(--text-muted)"
+                  strokeWidth={0.75 * k}
+                  strokeLinecap="square"
+                />
+              </g>
             )}
             {/* 海岸线：纸色衬底上一道墨线，深浅格上都看得见 */}
             <path d={land} fill="none" stroke="var(--page)" strokeWidth={1.8} strokeOpacity={0.8} pointerEvents="none" />
