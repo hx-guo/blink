@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import EventMap, { type ExposureGrid, type MapEvent, type Region } from "@/components/EventMap";
+import EventMap, { type MapEvent, type Region } from "@/components/EventMap";
+import { COVERAGE } from "@/lib/coverage";
 import EventTable, { type Ev } from "@/components/EventTable";
 import RangeBrush from "@/components/RangeBrush";
 import { ago, Loading } from "@/components/Shell";
@@ -57,22 +58,6 @@ function DateField({ label, value, onCommit }: { label: string; value: string; o
       onKeyDown={(e) => e.key === "Enter" && commit()}
     />
   );
-}
-
-/** 各仪器的曝光（运行时取） */
-function useExposures(slugs: string[]): ExposureGrid[] {
-  const [grids, setGrids] = useState<ExposureGrid[]>([]);
-  const key = slugs.join(",");
-  useEffect(() => {
-    let alive = true;
-    Promise.all(
-      key.split(",").filter(Boolean).map((s) => fetch(`${BASE}/data/${s}/exposure.json`).then((r) => r.json() as Promise<ExposureGrid>)),
-    ).then((g) => alive && setGrids(g));
-    return () => {
-      alive = false;
-    };
-  }, [key]);
-  return grids;
 }
 
 /** "2023"、"2023-05"、"2023-05-14" → 该年/月/日的 [起, 止)，UTC 毫秒；不是日期则 null */
@@ -129,8 +114,6 @@ export default function Home() {
   const [region, setRegion] = useState<Region | null>(null);
   const [query, setQuery] = useState("");
   const [note, setNote] = useState<string | null>(null);
-  const shownSlugs = (index?.instruments ?? []).filter((i) => detector === "all" || i.instrument === detector).map((i) => i.slug);
-  const exposures = useExposures(shownSlugs);
   const setSel = (a: Axis, v: [number, number] | null) =>
     setSels((s) => {
       const out = { ...s };
@@ -268,7 +251,7 @@ export default function Home() {
         <header className="margin-note caption">
           <h2 className="section-title mb-3">Find events</h2>
           <p>Drag on the map to select a region, or across the bars to select a span of time. The table lists what is selected.</p>
-          <p className="mt-3">The tint on the map is the area searched: the latitudes of the orbit, without the South Atlantic Anomaly, where the detectors are off.</p>
+          <p className="mt-3">The tint on the map is where the detectors observe: within the inclination of the orbit, 43° for Insight-HXMT, and outside the South Atlantic Anomaly, where they are switched off.</p>
           {many && (
             <span className="flex flex-col gap-1 mt-4">
               {["all", ...index.instruments.map((i) => i.instrument)].map((d) => (
@@ -281,7 +264,7 @@ export default function Home() {
         </header>
         <div className="flex flex-col gap-8">
           {catalogs ? (
-            <EventMap events={mapEvents} highlight={highlight} exposures={exposures} region={region} onRegion={setRegion} />
+            <EventMap events={mapEvents} highlight={highlight} coverage={(index.instruments ?? []).filter((i) => (detector === "all" || i.instrument === detector) && COVERAGE[i.instrument]).map((i) => COVERAGE[i.instrument])} region={region} onRegion={setRegion} />
           ) : (
             <Loading error={null} what="the catalog" />
           )}

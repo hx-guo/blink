@@ -6,6 +6,7 @@ import { useMemo, useRef, useState } from "react";
 import { feature } from "topojson-client";
 import type { Topology } from "topojson-specification";
 import land50 from "world-atlas/land-50m.json";
+import type { Coverage } from "@/lib/coverage";
 import { useMounted } from "@/lib/useMounted";
 
 export type MapEvent = {
@@ -28,80 +29,27 @@ const PH = Math.round((PW / 360) * (LAT_MAX - LAT_MIN));
 /** 挂载前占位的高度 */
 export const MAP_ASPECT_H = PH + MT + MB;
 
-/** 一台仪器的曝光：cell_deg 度的格，[格下沿纬度, 格西沿经度 0..360, 活时间秒] */
 /** 经纬度框：[西经界, 东经界, 南纬界, 北纬界]，度 */
 export type Region = [number, number, number, number];
-
-export type ExposureGrid = { cell_deg: number; map: [number, number, number][] };
-
-/**
- * 搜索覆盖的区域：有活时间的格（同纬度中位数 5 % 以上，去掉 SAA 里的零星秒数与坏星历的散点）
- * 放大、模糊后取阈值，5° 格的台阶变成光滑清晰的边。返回经度 −180..180、纬度自北向南的图。
- */
-function exposureImage(grids: ExposureGrid[], fill: string): string | null {
-  if (!grids.length || typeof document === "undefined") return null;
-  const d = grids[0].cell_deg;
-  const nx = 360 / d, ny = 180 / d;
-  const sum = new Float64Array(nx * ny);
-  for (const g of grids) {
-    for (const [lat, lon, sec] of g.map) {
-      const i = Math.floor((lat + 90) / d), j = Math.floor(((((lon + 180) % 360) + 360) % 360) / d);
-      if (i >= 0 && i < ny && j >= 0 && j < nx) sum[(ny - 1 - i) * nx + j] += sec;
-    }
-  }
-  const small = document.createElement("canvas");
-  small.width = nx;
-  small.height = ny;
-  const sctx = small.getContext("2d")!;
-  const cells = sctx.createImageData(nx, ny);
-  for (let r = 0; r < ny; r++) {
-    const row = Array.from(sum.subarray(r * nx, (r + 1) * nx));
-    const med = [...row].sort((a, b) => a - b)[nx >> 1];
-    row.forEach((v, j) => {
-      cells.data[(r * nx + j) * 4 + 3] = med > 0 && v > 0.05 * med ? 255 : 0;
-    });
-  }
-  sctx.putImageData(cells, 0, 0);
-  const S = 10; // 每度 S/d 像素
-  const big = document.createElement("canvas");
-  big.width = nx * S;
-  big.height = ny * S;
-  const ctx = big.getContext("2d")!;
-  ctx.imageSmoothingEnabled = true;
-  ctx.filter = `blur(${S * 0.6}px)`;
-  ctx.drawImage(small, 0, 0, big.width, big.height);
-  ctx.filter = "none";
-  const img = ctx.getImageData(0, 0, big.width, big.height);
-  const rgb = fill.match(/\w\w/g)!.map((h) => parseInt(h, 16));
-  for (let k = 0; k < img.data.length; k += 4) {
-    const on = img.data[k + 3] >= 128;
-    img.data[k] = rgb[0];
-    img.data[k + 1] = rgb[1];
-    img.data[k + 2] = rgb[2];
-    img.data[k + 3] = on ? 255 : 0;
-  }
-  ctx.putImageData(img, 0, 0);
-  return big.toDataURL();
-}
 
 const lonLabel = (l: number) => (l === 0 || Math.abs(l) === 180 ? `${Math.abs(l)}°` : `${Math.abs(l)}°${l < 0 ? "W" : "E"}`);
 const latLabel = (l: number) => (l === 0 ? "0°" : `${Math.abs(l)}°${l < 0 ? "S" : "N"}`);
 
 /**
- * 首页地图，按论文插图的样子：图框、细经纬网、外向刻度，陆地只画轮廓。搜索覆盖的区域（有活时间
- * 的格，平滑后取阈值）铺一层纸色，轨道纬度范围与 SAA 由数据自己显出来。点悬停出提示，点击进
+ * 首页地图，按论文插图的样子：图框、细经纬网、外向刻度，陆地只画轮廓。仪器看得到的区域（轨道倾角
+ * 以内、SAA 以外，见 lib/coverage.ts）铺一层深一级的纸色。点悬停出提示，点击进
  * 事件页；`highlight` 非空时选中的点用朱红，其余淡出。
  */
 export default function EventMap({
   events,
   highlight,
-  exposures,
+  coverage,
   region,
   onRegion,
 }: {
   events: MapEvent[];
   highlight: Set<string> | null;
-  exposures: ExposureGrid[];
+  coverage: Coverage[];
   region: Region | null;
   /** 在空白处拖出一个框来选区域 */
   onRegion: (r: Region) => void;
@@ -128,16 +76,12 @@ export default function EventMap({
       graticule: lines.join(""),
     };
   }, []);
-  const image = useMemo(
-    () => (mounted ? exposureImage(exposures, getComputedStyle(document.documentElement).getPropertyValue("--exposure").trim().slice(1) || "e6e0d3") : null),
-    [mounted, exposures],
-  );
   const H = MT + PH + MB;
   if (!mounted) return <div style={{ aspectRatio: `${PW + MR} / ${H}` }} />;
 
   const xy = (lon: number, lat: number) => projection([lon, lat]) ?? [0, 0];
-  const [gx0, gy0] = xy(-180, 90);
-  const [gx1, gy1] = xy(180, -90);
+  // 等距圆柱图上 SAA 顶点之间连直线，与论文的图一致
+  const polygon = (pts: [number, number][]) => `M${pts.map(([lo, la]) => xy(lo, la).map((v) => v.toFixed(1)).join(",")).join("L")}Z`;
   const hoverXY = hover ? xy(hover.lon, hover.lat) : null;
   const boxLeft = hoverXY ? hoverXY[0] < W * 0.62 : true;
   // 屏幕坐标 → 图内坐标（夹在图框内）
@@ -193,9 +137,21 @@ export default function EventMap({
           <clipPath id="map-frame">
             <rect x={ML} y={MT} width={PW} height={PH} />
           </clipPath>
+          {coverage.map((c, k) => {
+            const [, yN] = xy(0, c.inclination);
+            const [, yS] = xy(0, -c.inclination);
+            return (
+              <mask key={k} id={`coverage-${k}`} maskUnits="userSpaceOnUse" x={ML} y={MT} width={PW} height={PH}>
+                <rect x={ML} y={yN} width={PW} height={yS - yN} fill="white" />
+                <path d={polygon(c.saa)} fill="black" />
+              </mask>
+            );
+          })}
         </defs>
         <g clipPath="url(#map-frame)">
-          {image && <image href={image} x={gx0} y={gy0} width={gx1 - gx0} height={gy1 - gy0} preserveAspectRatio="none" />}
+          {coverage.map((_, k) => (
+            <rect key={k} x={ML} y={MT} width={PW} height={PH} fill="var(--exposure)" mask={`url(#coverage-${k})`} />
+          ))}
           <path d={graticule} fill="none" stroke="var(--axis)" strokeWidth={0.35} strokeOpacity={0.6} />
           <path d={land} fill="none" stroke="var(--land)" strokeWidth={0.55} strokeOpacity={0.55} />
           {ordered.map((e) => {
