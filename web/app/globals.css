@@ -40,18 +40,10 @@
   /* 墨点；选中与强调用朱红 */
   --ink: #1c1b19;
   --accent: #b5442b;
-  --accent-strong: #9c3520;
   --accent-soft: rgba(181, 68, 43, 0.08);
   --land: #1c1b19;
   /* 搜索覆盖的区域：比纸面深一级的纸色 */
   --exposure: #e6e0d3;
-  --inst-1: #1c1b19;
-  --inst-2: #b5442b;
-  --inst-3: #3d6e8f;
-  /* 光变曲线：全部事例 / ACD 符合事例 */
-  --series-1: #2f5d7c;
-  --series-2: #b5442b;
-  --banner: #ece4d2;
 }
 @media (prefers-color-scheme: dark) {
   :root:where(:not([data-theme="light"])) {
@@ -69,16 +61,9 @@
     --link: #e9e5dc;
     --ink: #e9e5dc;
     --accent: #e0775c;
-    --accent-strong: #ec8b71;
     --accent-soft: rgba(224, 119, 92, 0.12);
     --land: #e9e5dc;
     --exposure: #26241f;
-    --inst-1: #e9e5dc;
-    --inst-2: #e0775c;
-    --inst-3: #7fa9c6;
-    --series-1: #7fa9c6;
-    --series-2: #e0775c;
-    --banner: #2c2820;
   }
 }
 :root[data-theme="dark"] {
@@ -96,16 +81,9 @@
   --link: #e9e5dc;
   --ink: #e9e5dc;
   --accent: #e0775c;
-  --accent-strong: #ec8b71;
   --accent-soft: rgba(224, 119, 92, 0.12);
   --land: #e9e5dc;
   --exposure: #26241f;
-  --inst-1: #e9e5dc;
-  --inst-2: #e0775c;
-  --inst-3: #7fa9c6;
-  --series-1: #7fa9c6;
-  --series-2: #e0775c;
-  --banner: #2c2820;
 }
 
 html,

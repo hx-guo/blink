@@ -1,14 +1,5 @@
 export const BASE = process.env.NEXT_PUBLIC_BASE_PATH || "";
 
-/** 仪器 → 固定颜色槽（颜色跟随仪器，不随筛选变） */
-const SLOTS: Record<string, number> = {
-  "Insight-HXMT/HE": 1,
-  "Fermi/GBM": 2,
-  "SVOM/GRM": 3,
-};
-export const instrumentColor = (instrument: string) =>
-  `var(--inst-${SLOTS[instrument] ?? 1})`;
-
 /** "2017-06-23T02:00:05.918894976Z" → "2017-06-23 02:00:05.918895" */
 export function utc(t: string, digits = 6): string {
   const [date, rest] = t.replace("Z", "").split("T");
