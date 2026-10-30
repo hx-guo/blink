@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import EventMap, { type MapEvent, type Region } from "@/components/EventMap";
 import { COVERAGE } from "@/lib/coverage";
 import EventTable, { type Ev } from "@/components/EventTable";
@@ -38,13 +38,16 @@ function rangeText(axis: Axis, [a, b]: [number, number]): string {
 
 /** 日期输入：纯文本 YYYY-MM-DD，回车或离开时生效；清空即取消选择 */
 function DateField({ label, value, onCommit }: { label: string; value: string; onCommit: (ms: number | null) => void }) {
-  const [text, setText] = useState(value);
-  useEffect(() => setText(value), [value]);
+  // 只在编辑时有草稿；没在编辑就显示外面给的值，提交或放弃后清掉草稿
+  const [draft, setDraft] = useState<string | null>(null);
+  const text = draft ?? value;
   const commit = () => {
-    if (!text.trim()) return onCommit(null);
-    const ms = Date.parse(`${text.trim()}T00:00:00Z`);
-    if (/^\d{4}-\d{2}-\d{2}$/.test(text.trim()) && Number.isFinite(ms)) onCommit(ms);
-    else setText(value);
+    if (draft === null) return;
+    const t = draft.trim();
+    const ms = Date.parse(`${t}T00:00:00Z`);
+    if (!t) onCommit(null);
+    else if (/^\d{4}-\d{2}-\d{2}$/.test(t) && Number.isFinite(ms)) onCommit(ms);
+    setDraft(null);
   };
   return (
     <input
@@ -53,7 +56,7 @@ function DateField({ label, value, onCommit }: { label: string; value: string; o
       placeholder="YYYY-MM-DD"
       size={10}
       value={text}
-      onChange={(e) => setText(e.target.value)}
+      onChange={(e) => setDraft(e.target.value)}
       onBlur={commit}
       onKeyDown={(e) => e.key === "Enter" && commit()}
     />

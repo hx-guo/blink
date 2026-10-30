@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-import { eventHref, sci } from "@/lib/format";
+import { useMemo, useState } from "react";
+import { eventHref } from "@/lib/format";
 
 export type Ev = {
   key: string;
@@ -65,8 +65,10 @@ export default function EventTable({ events, caption, showDetector = true }: { e
   const columns = COLUMNS.filter((c) => showDetector || !c.detector);
   const [sort, setSort] = useState<{ key: Key; desc: boolean }>({ key: "startMs", desc: true });
   const [size, setSize] = useState(20);
-  const [page, setPage] = useState(0);
-  useEffect(() => setPage(0), [events, size]);
+  // 页码只对当前这组事件与每页条数有效，换了就回到第一页
+  const [paging, setPaging] = useState({ events, size, page: 0 });
+  const page = paging.events === events && paging.size === size ? paging.page : 0;
+  const setPage = (p: number) => setPaging({ events, size, page: p });
 
   const sorted = useMemo(() => {
     const out = [...events];
