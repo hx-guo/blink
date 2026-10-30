@@ -7,7 +7,8 @@ export type Loaded<T> = { data: T | null; error: string | null };
 
 /**
  * 运行时取 `blink export` 写出的 JSON（相对 data/）。网页外壳构建时不读数据，
- * 管线更新数据文件即可，无需重建站点。
+ * 管线更新数据文件即可，无需重建站点。数据每小时更新：`no-cache` 让浏览器每次向服务器确认
+ * （没变就是一个 304），不按自己估的新鲜期用旧文件。
  */
 export function useJson<T>(path: string | null): Loaded<T> {
   // 结果连同它的路径一起存，路径一变旧结果自然作废
@@ -15,7 +16,7 @@ export function useJson<T>(path: string | null): Loaded<T> {
   useEffect(() => {
     if (!path) return;
     let alive = true;
-    fetch(`${BASE}/data/${path}`)
+    fetch(`${BASE}/data/${path}`, { cache: "no-cache" })
       .then((r) => (r.ok ? (r.json() as Promise<T>) : Promise.reject(new Error(`${r.status} ${path}`))))
       .then((data) => alive && setState({ path, data, error: null }))
       .catch((e: Error) => alive && setState({ path, data: null, error: e.message }));

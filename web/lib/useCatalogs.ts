@@ -11,7 +11,7 @@ export function useCatalogs(slugs: string[]): Catalog[] | null {
   useEffect(() => {
     let alive = true;
     Promise.all(
-      key.split(",").filter(Boolean).map((s) => fetch(`${BASE}/data/${s}/catalog.json`).then((r) => r.json() as Promise<Catalog>)),
+      key.split(",").filter(Boolean).map((s) => fetch(`${BASE}/data/${s}/catalog.json`, { cache: "no-cache" }).then((r) => r.json() as Promise<Catalog>)),
     ).then((c) => alive && setCatalogs(c));
     return () => {
       alive = false;
