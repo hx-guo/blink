@@ -125,8 +125,8 @@ export default function EventView({ event, head }: { event: EventRecord; head: R
         title="Light curve"
         note={
           <>
-            <p>Counts within 1 ms of the candidate window (shaded); the dashed lines bound the best interval.</p>
-            <p className="mt-3">In full ink: counts with an anti-coincidence shield firing. Below: the energy channel of each count, filled when a shield fired.</p>
+            <p>Counts from 1 ms before to 1 ms after the candidate window.</p>
+            <p className="mt-3">Above, the counts per bin; below, the energy channel of each count.</p>
             {lc && (
               <p className="mt-4 flex gap-4 flex-wrap tabular">
                 {BIN_CHOICES.map((b) => (

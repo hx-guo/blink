@@ -33,6 +33,47 @@ function XAxis({ x, y, ticks, fmt }: { x: (t: number) => number; y: number; tick
   );
 }
 
+/** 图例：每项一个与图上同样画法的小样，色与线都取同一套 token */
+function Legend() {
+  const item = (key: string, swatch: React.ReactNode, label: string) => (
+    <span key={key} className="flex items-center gap-2">
+      <svg width={34} height={14} aria-hidden className="block">
+        {swatch}
+      </svg>
+      {label}
+    </span>
+  );
+  return (
+    <div className="caption flex flex-wrap gap-x-6 gap-y-1 mb-3">
+      {item(
+        "all",
+        <>
+          <rect x={0} y={1} width={10} height={12} fill="var(--ink)" opacity={0.4} />
+          <circle cx={24} cy={7} r={3} fill="none" stroke="var(--ink)" strokeWidth={0.9} opacity={0.6} />
+        </>,
+        "All counts",
+      )}
+      {item(
+        "acd",
+        <>
+          <rect x={0} y={1} width={10} height={12} fill="var(--ink)" opacity={0.9} />
+          <circle cx={24} cy={7} r={3} fill="var(--ink)" opacity={0.9} />
+        </>,
+        "With an anti-coincidence shield firing",
+      )}
+      {item("window", <rect x={0} y={1} width={34} height={12} fill="var(--wash)" stroke="var(--border)" strokeWidth={0.5} />, "Candidate window")}
+      {item(
+        "best",
+        <>
+          <line x1={9} x2={9} y1={0} y2={14} stroke="var(--text-primary)" strokeWidth={0.75} strokeDasharray="3 3" />
+          <line x1={25} x2={25} y1={0} y2={14} stroke="var(--text-primary)" strokeWidth={0.75} strokeDasharray="3 3" />
+        </>,
+        "Best interval",
+      )}
+    </div>
+  );
+}
+
 /**
  * 候选附近的逐事例数据：上面是计数直方图（全部事例墨色，其中 ACD 着火的叠成深墨），下面是每个
  * 事例的时间与能道，两图共用时间轴。候选窗铺浅底，最佳区间用虚线标出。
@@ -82,6 +123,7 @@ export function EventLightCurve({
 
   return (
     <div ref={ref} className="relative">
+      <Legend />
       <svg width={W} height={H} className="block" role="img" aria-label="Counts per bin around the candidate">
         <Marks x={x} y0={M.top} y1={H - M.bottom} window={window} best={best} />
         {yTicks.map((t) => (
