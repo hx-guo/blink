@@ -10,6 +10,8 @@
 //!   同一个暴一并剔除（HXMT 论文 4.6 节）。
 //! * **事件状态。** 判据所需的数据都齐了才是 `final`，否则 `provisional` 并写明
 //!   缺什么（`pending` 列）。编号只发给 final（见 docs/tgf-pipeline-design.md 第 3 节）。
+//!   数据缺口过了宽限期就是定论：缺数小时算已有结论；本底有缺口、GRB 检验算不出 Z 的候选
+//!   照样入选（`grb_z` 空着），同 HXMT 论文（算不出 Z 的那一个 TGF 留在目录里）。
 //!
 //! 产出到 `--out-dir`：
 //!
@@ -132,7 +134,8 @@ impl Rejection {
     }
 }
 
-/// 数据缺失（`MissingData`）的小时要等多久才算定论：实时运行时文件可能只是还没到
+/// 数据缺失要等多久才算定论：实时运行时文件可能只是还没到。缺数的小时、GRB 检验本底里的
+/// 缺口都按它
 pub const DEFAULT_SETTLE_DAYS: i64 = 7;
 
 pub fn cmd_catalog_pipeline<I: Instrument>(
@@ -249,7 +252,8 @@ pub fn cmd_catalog_pipeline<I: Instrument>(
         let mut pending = Vec::new();
         match vets.get(&signal.start) {
             None => pending.push("not_vetted"),
-            Some(v) if v.grb.z.is_none() => pending.push("grb_background_gap"),
+            // 本底有缺口算不出 Z：宽限期内等数据，过了就是定论，按论文入选
+            Some(v) if v.grb.z.is_none() && signal.start >= settled_before => pending.push("grb_background_gap"),
             Some(_) => {}
         }
         let mut hour = floor_hour(signal.start - half_window);
@@ -495,7 +499,8 @@ mod tests {
         .unwrap();
 
         let out = dir.join("out");
-        cmd_catalog_pipeline::<HxmtHe>(&dir.join("data"), &out, Some(34), DEFAULT_SETTLE_DAYS);
+        // 宽限期按 10 万天算：数据都还"刚到"，缺口都还在等
+        cmd_catalog_pipeline::<HxmtHe>(&dir.join("data"), &out, Some(34), 100_000);
 
         let csv = fs::read_to_string(out.join("catalog.csv")).unwrap();
         let row = |t: &str| csv.lines().find(|l| l.contains(t)).map(str::to_string);
@@ -564,6 +569,28 @@ mod tests {
         assert!(row(100_000).contains(",provisional,neighbors_unsearched,"));
         // 宽限期已过：缺数据是定论
         assert!(row(7).contains(",final,,"));
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_background_gap_settles_into_the_catalog() {
+        let dir = std::env::temp_dir().join(format!("blink_catalog_gap_{}", std::process::id()));
+        let month = dir.join("data/Insight-HXMT_HE/2024/10");
+        fs::create_dir_all(&month).unwrap();
+        fs::write(month.join("20241009_signals.json"), format!("[{}]", signal("2024-10-09T04:00:00.000000000Z", 1e-9))).unwrap();
+        fs::write(month.join("20241009_hours.json"), hours("2024-10-09", 24)).unwrap();
+        fs::write(month.join("20241009_vet.json"), format!("[{}]", vet("2024-10-09T04:00:00.000000000Z", None, false))).unwrap();
+        let row = |settle: i64| {
+            let out = dir.join(format!("out{settle}"));
+            cmd_catalog_pipeline::<HxmtHe>(&dir.join("data"), &out, Some(34), settle);
+            fs::read_to_string(out.join("catalog.csv")).unwrap().lines().nth(1).unwrap().to_string()
+        };
+        // 宽限期内：缺口可能等来数据
+        assert!(row(100_000).contains(",provisional,grb_background_gap,"));
+        // 宽限期已过：入选，Z 空着
+        let settled = row(7);
+        assert!(settled.contains(",final,,"), "{settled}");
+        assert!(settled.contains(",0,,0.300,"), "{settled}");
         fs::remove_dir_all(&dir).unwrap();
     }
 }

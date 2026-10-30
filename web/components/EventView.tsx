@@ -12,7 +12,7 @@ import Sup from "./Sup";
 
 const PENDING: Record<string, string> = {
   not_vetted: "the candidate has not been vetted yet",
-  grb_background_gap: "the data around it have a gap, so the gamma-ray burst test is undetermined",
+  grb_background_gap: "the data around it have a gap, so the gamma-ray burst test waits for them",
   neighbors_unsearched: "not all data within ±10 min have been searched, so the train test is incomplete",
 };
 
@@ -71,7 +71,7 @@ export default function EventView({ event, head }: { event: EventRecord; head: R
     ["Train", event.neighbors_10min == null ? "–" : `${event.neighbors_10min} other candidates within ±10 min`, sel ? `at most ${sel.train_threshold}` : ""],
     [
       "Gamma-ray burst",
-      event.grb_z == null ? "undetermined" : `Z = ${event.grb_z.toFixed(1)}, largest box share ${event.grb_max_box_share?.toFixed(2)}`,
+      event.grb_z == null ? "undetermined: the data around it have a gap" : `Z = ${event.grb_z.toFixed(1)}, largest box share ${event.grb_max_box_share?.toFixed(2)}`,
       sel ? `a burst if ${String(sel.grb_rule)}` : "",
     ],
     [

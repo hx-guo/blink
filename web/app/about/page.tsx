@@ -18,7 +18,7 @@ const COLUMNS: [string, string, string][] = [
   ["altitude_km", "km", "Altitude of the satellite"],
   ["solar_time", "h:m:s", "Apparent solar time at the sub-satellite point"],
   ["neighbors_10min", "", "Other candidates within ±10 min (train test)"],
-  ["grb_z", "σ", "Significance of emission from −0.1 to +0.3 s outside the candidate"],
+  ["grb_z", "σ", "Significance of emission from −0.1 to +0.3 s outside the candidate; empty when a data gap leaves it undetermined (such events enter the catalog once the gap is a week old)"],
   ["grb_max_box_share", "", "Largest excess of one detector box over the total excess (GRB test)"],
   ["electron_beam", "0 / 1", "Flagged as an electron beam"],
   ["beam_p", "", "Binomial probability of the counts that fire only the top anti-coincidence shields"],
