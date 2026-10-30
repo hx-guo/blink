@@ -169,24 +169,26 @@ export default function EventView({ event, head }: { event: EventRecord; head: R
       </Section>
 
       <Section title="Tests" note={<p>The values behind the selection, against the rule of each test.</p>}>
-        <table className="data wrap">
-          <thead>
-            <tr>
-              <th>Test</th>
-              <th>This event</th>
-              <th>Rule</th>
-            </tr>
-          </thead>
-          <tbody>
-            {tests.map(([k, v, r]) => (
-              <tr key={k}>
-                <td className="secondary" style={{ whiteSpace: "nowrap", overflowWrap: "normal" }}>{k}</td>
-                <td className="tabular">{sup(v)}</td>
-                <td className="secondary" style={{ fontSize: 14.5 }}>{sup(r)}</td>
+        <div className="table-scroll">
+          <table style={{ minWidth: 520 }} className="data wrap">
+            <thead>
+              <tr>
+                <th>Test</th>
+                <th>This event</th>
+                <th>Rule</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {tests.map(([k, v, r]) => (
+                <tr key={k}>
+                  <td className="secondary" style={{ whiteSpace: "nowrap", overflowWrap: "normal" }}>{k}</td>
+                  <td className="tabular">{sup(v)}</td>
+                  <td className="secondary" style={{ fontSize: 14.5 }}>{sup(r)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </Section>
 
       <Section title="Record">

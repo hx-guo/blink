@@ -349,7 +349,7 @@ export default function Home() {
           <h2 className="section-title mb-3">Data</h2>
           <p>The files behind this page, rewritten at every update. Versioned releases are archived with a DOI.</p>
         </header>
-        <div className="grid gap-12 lg:grid-cols-2">
+        <div className="grid grid-cols-1 gap-12 lg:grid-cols-2">
           <div>
             <h3 className="label pb-2" style={{ borderBottom: "0.5px solid var(--border-strong)" }}>Files</h3>
             <ul>

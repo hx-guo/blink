@@ -93,24 +93,26 @@ export default function About() {
           <h2 className="section-title mb-3">Columns</h2>
           <p>The columns of catalog.csv and catalog.json, in order.</p>
         </header>
-        <table className="data wrap">
-          <thead>
-            <tr>
-              <th>Column</th>
-              <th>Unit</th>
-              <th>Meaning</th>
-            </tr>
-          </thead>
-          <tbody>
-            {COLUMNS.map(([k, u, m]) => (
-              <tr key={k}>
-                <td className="tabular" style={{ whiteSpace: "nowrap", overflowWrap: "normal" }}>{k}</td>
-                <td className="secondary tabular" style={{ whiteSpace: "nowrap", overflowWrap: "normal" }}>{u}</td>
-                <td className="secondary" style={{ fontSize: 14.5 }}>{m}</td>
+        <div className="table-scroll">
+          <table style={{ minWidth: 520 }} className="data wrap">
+            <thead>
+              <tr>
+                <th>Column</th>
+                <th>Unit</th>
+                <th>Meaning</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {COLUMNS.map(([k, u, m]) => (
+                <tr key={k}>
+                  <td className="tabular" style={{ whiteSpace: "nowrap", overflowWrap: "normal" }}>{k}</td>
+                  <td className="secondary tabular" style={{ whiteSpace: "nowrap", overflowWrap: "normal" }}>{u}</td>
+                  <td className="secondary" style={{ fontSize: 14.5 }}>{m}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </section>
 
 

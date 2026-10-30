@@ -168,7 +168,7 @@ export default function InstrumentPage() {
         <div className="flex flex-col gap-14">
           {exposure && cat ? <RateMap cells={rateCells(exposure, fLon, fLat)} minHours={24} /> : <Loading error={null} what="the exposure" />}
           {exposure && cat && (
-            <div className="grid gap-12 lg:grid-cols-2">
+            <div className="grid grid-cols-1 gap-12 lg:grid-cols-2">
               <Chart title="By latitude, TGFs per hour">
                 <Bars
                   label="TGFs per hour of exposure by latitude"
@@ -198,7 +198,7 @@ export default function InstrumentPage() {
           <p>Duration is the best interval of the search, from the first to the last count of the most significant window. Counts are the events in that interval.</p>
         </header>
         {cat ? (
-          <div className="grid gap-12 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-12 lg:grid-cols-2">
             <Chart title="Duration">
               <Bars label="Number of TGFs by duration" bins={logBins(col<number>("duration_us").filter((d) => d > 0), 10, 1000, 8, fmtUs)} endTick="1 ms" unit=" TGFs" />
             </Chart>
@@ -218,25 +218,27 @@ export default function InstrumentPage() {
             What each step of the selection removed in the current run. The criteria are described on the <Link href="/about/">About</Link> page.
           </p>
         </header>
-        <div className="grid gap-12 lg:grid-cols-2">
-          <table className="data tabular">
-            <thead>
-              <tr>
-                <th>Step</th>
-                <th style={{ textAlign: "right" }}>Removed</th>
-                <th style={{ textAlign: "right" }}>Left</th>
-              </tr>
-            </thead>
-            <tbody>
-              {funnel.map(([k, removed, left]) => (
-                <tr key={k}>
-                  <td className="secondary" style={{ whiteSpace: "normal" }}><Sup text={k} /></td>
-                  <td style={{ textAlign: "right" }}>{removed == null ? "" : removed.toLocaleString("en")}</td>
-                  <td style={{ textAlign: "right" }}>{left == null ? "…" : left.toLocaleString("en")}</td>
+        <div className="grid grid-cols-1 gap-12 lg:grid-cols-2">
+          <div className="table-scroll">
+            <table className="data tabular">
+              <thead>
+                <tr>
+                  <th>Step</th>
+                  <th style={{ textAlign: "right" }}>Removed</th>
+                  <th style={{ textAlign: "right" }}>Left</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {funnel.map(([k, removed, left]) => (
+                  <tr key={k}>
+                    <td className="secondary" style={{ whiteSpace: "normal" }}><Sup text={k} /></td>
+                    <td style={{ textAlign: "right" }}>{removed == null ? "" : removed.toLocaleString("en")}</td>
+                    <td style={{ textAlign: "right" }}>{left == null ? "…" : left.toLocaleString("en")}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           <div>
             <h3 className="label pb-2" style={{ borderBottom: "0.5px solid var(--border-strong)" }}>This run</h3>
             <dl className="caption tabular">

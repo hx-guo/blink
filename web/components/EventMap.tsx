@@ -8,6 +8,7 @@ import type { Topology } from "topojson-specification";
 import land50 from "world-atlas/land-50m.json";
 import type { Coverage } from "@/lib/coverage";
 import { useMounted } from "@/lib/useMounted";
+import { useViewScale } from "@/lib/useWidth";
 import Sup from "./Sup";
 
 export type MapEvent = {
@@ -57,6 +58,7 @@ export default function EventMap({
 }) {
   const mounted = useMounted();
   const router = useRouter();
+  const [scaleRef, k] = useViewScale<HTMLDivElement>(PW + MR);
   const svgRef = useRef<SVGSVGElement>(null);
   const [hover, setHover] = useState<MapEvent | null>(null);
   const [drag, setDrag] = useState<{ a: [number, number]; b: [number, number] } | null>(null);
@@ -77,8 +79,8 @@ export default function EventMap({
       graticule: lines.join(""),
     };
   }, []);
-  const H = MT + PH + MB;
-  if (!mounted) return <div style={{ aspectRatio: `${PW + MR} / ${H}` }} />;
+  const H = MT + PH + MB * k;
+  if (!mounted) return <div ref={scaleRef} style={{ aspectRatio: `${PW + MR} / ${H}` }} />;
 
   const xy = (lon: number, lat: number) => projection([lon, lat]) ?? [0, 0];
   // 等距圆柱图上 SAA 顶点之间连直线，与论文的图一致
@@ -97,138 +99,140 @@ export default function EventMap({
   const ordered = highlight ? [...events.filter((e) => !highlight.has(e.key)), ...events.filter((e) => highlight.has(e.key))] : events;
 
   return (
-    <div className="relative">
-      <svg
-        ref={svgRef}
-        viewBox={`${ML} 0 ${PW + MR} ${H}`}
-        className="w-full h-auto select-none"
-        style={{ overflow: "visible", cursor: "crosshair", touchAction: "none" }}
-        role="img"
-        aria-label="Sub-satellite points of the TGFs over the area searched; drag to select a region"
-        onPointerDown={(e) => {
-          // 记下起点；移动超过几个像素才算框选，否则留给点的单击
-          press.current = { x: e.clientX, y: e.clientY, id: e.pointerId };
-        }}
-        onPointerMove={(e) => {
-          const p0 = press.current;
-          if (!p0) return;
-          if (!drag) {
-            if (Math.hypot(e.clientX - p0.x, e.clientY - p0.y) < 5) return;
-            (e.currentTarget as Element).setPointerCapture(p0.id);
-            setHover(null);
-            setDrag({ a: toPlot(p0.x, p0.y), b: toPlot(e.clientX, e.clientY) });
-          } else setDrag({ ...drag, b: toPlot(e.clientX, e.clientY) });
-        }}
-        onPointerUp={() => {
-          press.current = null;
-          if (!drag) return;
-          const [x0, x1] = [Math.min(drag.a[0], drag.b[0]), Math.max(drag.a[0], drag.b[0])];
-          const [y0, y1] = [Math.min(drag.a[1], drag.b[1]), Math.max(drag.a[1], drag.b[1])];
-          setDrag(null);
-          // 拖完松手时浏览器还会补发一次单击，别让它打开事件页
-          suppressClick.current = true;
-          setTimeout(() => (suppressClick.current = false), 0);
-          if (x1 - x0 < 4 || y1 - y0 < 4) return;
-          const [w, n] = projection.invert!([x0, y0])!;
-          const [e2, s2] = projection.invert!([x1, y1])!;
-          onRegion([Math.round(w), Math.round(e2), Math.round(s2), Math.round(n)]);
-        }}
-      >
-        <defs>
-          <clipPath id="map-frame">
-            <rect x={ML} y={MT} width={PW} height={PH} />
-          </clipPath>
-          {coverage.map((c, k) => {
-            const [, yN] = xy(0, c.inclination);
-            const [, yS] = xy(0, -c.inclination);
-            return (
-              <mask key={k} id={`coverage-${k}`} maskUnits="userSpaceOnUse" x={ML} y={MT} width={PW} height={PH}>
-                <rect x={ML} y={yN} width={PW} height={yS - yN} fill="white" />
-                <path d={polygon(c.saa)} fill="black" />
-              </mask>
-            );
-          })}
-        </defs>
-        <g clipPath="url(#map-frame)">
-          {coverage.map((_, k) => (
-            <rect key={k} x={ML} y={MT} width={PW} height={PH} fill="var(--exposure)" mask={`url(#coverage-${k})`} />
-          ))}
-          <path d={graticule} fill="none" stroke="var(--axis)" strokeWidth={0.35} strokeOpacity={0.6} />
-          <path d={land} fill="none" stroke="var(--land)" strokeWidth={0.55} strokeOpacity={0.55} />
-          {ordered.map((e) => {
-            const [x, y] = xy(e.lon, e.lat);
-            const on = !highlight || highlight.has(e.key);
-            const picked = highlight && on;
-            return (
-              <circle
-                key={e.key}
-                cx={x}
-                cy={y}
-                r={hover === e ? 4 : picked ? 2 : 1.45}
-                fill={e.provisional ? "var(--surface)" : picked ? "var(--accent)" : "var(--ink)"}
-                stroke={e.provisional ? "var(--ink)" : "none"}
-                strokeWidth={0.8}
-                opacity={on ? (picked ? 0.9 : 0.42) : 0.08}
-                style={{ cursor: "pointer" }}
-                onMouseEnter={() => setHover(e)}
-                onMouseLeave={() => setHover(null)}
-                onClick={() => {
-                  if (suppressClick.current) suppressClick.current = false;
-                  else router.push(e.href);
-                }}
-              />
-            );
-          })}
-        </g>
-        {box && (
-          <rect
-            x={Math.min(box.a[0], box.b[0])}
-            y={Math.min(box.a[1], box.b[1])}
-            width={Math.abs(box.b[0] - box.a[0])}
-            height={Math.abs(box.b[1] - box.a[1])}
-            fill="var(--accent-soft)"
-            stroke="var(--accent)"
-            strokeWidth={0.75}
-            pointerEvents="none"
-          />
-        )}
-        <rect x={ML} y={MT} width={PW} height={PH} fill="none" stroke="var(--border-strong)" strokeWidth={0.75} />
-        {[-120, -60, 0, 60, 120].map((l) => {
-          const [x] = xy(l, 0);
-          return (
-            <g key={l}>
-              <line x1={x} x2={x} y1={MT + PH} y2={MT + PH + 4} stroke="var(--border-strong)" strokeWidth={0.75} />
-              <text x={x} y={MT + PH + 19} textAnchor="middle" fontSize={13} fill="var(--text-secondary)">{lonLabel(l)}</text>
-            </g>
-          );
-        })}
-        {[-30, 0, 30, 60].map((l) => {
-          const [, y] = xy(0, l);
-          return (
-            <g key={l}>
-              <line x1={ML - 4} x2={ML} y1={y} y2={y} stroke="var(--border-strong)" strokeWidth={0.75} />
-              <text x={ML - 8} y={y} dy="0.35em" textAnchor="end" fontSize={13} fill="var(--text-secondary)">{latLabel(l)}</text>
-            </g>
-          );
-        })}
-      </svg>
-      {hover && hoverXY && (
-        <div
-          className="map-tip"
-          style={{
-            left: `${((hoverXY[0] - ML + (boxLeft ? 12 : -12)) / (PW + MR)) * 100}%`,
-            top: `${(hoverXY[1] / H) * 100}%`,
-            transform: `translate(${boxLeft ? "0" : "-100%"}, -50%)`,
+    <div style={{ paddingLeft: k > 1.2 ? 40 : 0 }}>
+      <div ref={scaleRef} className="relative">
+        <svg
+          ref={svgRef}
+          viewBox={`${ML} 0 ${PW + MR} ${H}`}
+          className="w-full h-auto select-none"
+          style={{ overflow: "visible", cursor: "crosshair", touchAction: "none" }}
+          role="img"
+          aria-label="Sub-satellite points of the TGFs over the area searched; drag to select a region"
+          onPointerDown={(e) => {
+            // 记下起点；移动超过几个像素才算框选，否则留给点的单击
+            press.current = { x: e.clientX, y: e.clientY, id: e.pointerId };
+          }}
+          onPointerMove={(e) => {
+            const p0 = press.current;
+            if (!p0) return;
+            if (!drag) {
+              if (Math.hypot(e.clientX - p0.x, e.clientY - p0.y) < 5) return;
+              (e.currentTarget as Element).setPointerCapture(p0.id);
+              setHover(null);
+              setDrag({ a: toPlot(p0.x, p0.y), b: toPlot(e.clientX, e.clientY) });
+            } else setDrag({ ...drag, b: toPlot(e.clientX, e.clientY) });
+          }}
+          onPointerUp={() => {
+            press.current = null;
+            if (!drag) return;
+            const [x0, x1] = [Math.min(drag.a[0], drag.b[0]), Math.max(drag.a[0], drag.b[0])];
+            const [y0, y1] = [Math.min(drag.a[1], drag.b[1]), Math.max(drag.a[1], drag.b[1])];
+            setDrag(null);
+            // 拖完松手时浏览器还会补发一次单击，别让它打开事件页
+            suppressClick.current = true;
+            setTimeout(() => (suppressClick.current = false), 0);
+            if (x1 - x0 < 4 || y1 - y0 < 4) return;
+            const [w, n] = projection.invert!([x0, y0])!;
+            const [e2, s2] = projection.invert!([x1, y1])!;
+            onRegion([Math.round(w), Math.round(e2), Math.round(s2), Math.round(n)]);
           }}
         >
-          {hover.rows.map(([k, v], i) => (
-            <div key={i}>
-              {k && <span className="muted">{k} </span>}
-              <span className={i === 0 ? "" : "tabular"} style={i === 0 ? { fontWeight: 600 } : undefined}><Sup text={v} /></span>
-            </div>
-          ))}
-        </div>
-      )}
+          <defs>
+            <clipPath id="map-frame">
+              <rect x={ML} y={MT} width={PW} height={PH} />
+            </clipPath>
+            {coverage.map((c, k) => {
+              const [, yN] = xy(0, c.inclination);
+              const [, yS] = xy(0, -c.inclination);
+              return (
+                <mask key={k} id={`coverage-${k}`} maskUnits="userSpaceOnUse" x={ML} y={MT} width={PW} height={PH}>
+                  <rect x={ML} y={yN} width={PW} height={yS - yN} fill="white" />
+                  <path d={polygon(c.saa)} fill="black" />
+                </mask>
+              );
+            })}
+          </defs>
+          <g clipPath="url(#map-frame)">
+            {coverage.map((_, k) => (
+              <rect key={k} x={ML} y={MT} width={PW} height={PH} fill="var(--exposure)" mask={`url(#coverage-${k})`} />
+            ))}
+            <path d={graticule} fill="none" stroke="var(--axis)" strokeWidth={0.35} strokeOpacity={0.6} />
+            <path d={land} fill="none" stroke="var(--land)" strokeWidth={0.55} strokeOpacity={0.55} />
+            {ordered.map((e) => {
+              const [x, y] = xy(e.lon, e.lat);
+              const on = !highlight || highlight.has(e.key);
+              const picked = highlight && on;
+              return (
+                <circle
+                  key={e.key}
+                  cx={x}
+                  cy={y}
+                  r={(hover === e ? 4 : picked ? 2 : 1.45) * Math.sqrt(k)}
+                  fill={e.provisional ? "var(--surface)" : picked ? "var(--accent)" : "var(--ink)"}
+                  stroke={e.provisional ? "var(--ink)" : "none"}
+                  strokeWidth={0.8}
+                  opacity={on ? (picked ? 0.9 : 0.42) : 0.08}
+                  style={{ cursor: "pointer" }}
+                  onMouseEnter={() => setHover(e)}
+                  onMouseLeave={() => setHover(null)}
+                  onClick={() => {
+                    if (suppressClick.current) suppressClick.current = false;
+                    else router.push(e.href);
+                  }}
+                />
+              );
+            })}
+          </g>
+          {box && (
+            <rect
+              x={Math.min(box.a[0], box.b[0])}
+              y={Math.min(box.a[1], box.b[1])}
+              width={Math.abs(box.b[0] - box.a[0])}
+              height={Math.abs(box.b[1] - box.a[1])}
+              fill="var(--accent-soft)"
+              stroke="var(--accent)"
+              strokeWidth={0.75}
+              pointerEvents="none"
+            />
+          )}
+          <rect x={ML} y={MT} width={PW} height={PH} fill="none" stroke="var(--border-strong)" strokeWidth={0.75 * k} />
+          {[-120, -60, 0, 60, 120].map((l) => {
+            const [x] = xy(l, 0);
+            return (
+              <g key={l}>
+                <line x1={x} x2={x} y1={MT + PH} y2={MT + PH + 4 * k} stroke="var(--border-strong)" strokeWidth={0.75 * k} />
+                <text x={x} y={MT + PH + 19 * k} textAnchor="middle" fontSize={13 * k} fill="var(--text-secondary)">{lonLabel(l)}</text>
+              </g>
+            );
+          })}
+          {[-30, 0, 30, 60].map((l) => {
+            const [, y] = xy(0, l);
+            return (
+              <g key={l}>
+                <line x1={ML - 4 * k} x2={ML} y1={y} y2={y} stroke="var(--border-strong)" strokeWidth={0.75 * k} />
+                <text x={ML - 8 * k} y={y} dy="0.35em" textAnchor="end" fontSize={13 * k} fill="var(--text-secondary)">{latLabel(l)}</text>
+              </g>
+            );
+          })}
+        </svg>
+        {hover && hoverXY && (
+          <div
+            className="map-tip"
+            style={{
+              left: `${((hoverXY[0] - ML + (boxLeft ? 12 : -12)) / (PW + MR)) * 100}%`,
+              top: `${(hoverXY[1] / H) * 100}%`,
+              transform: `translate(${boxLeft ? "0" : "-100%"}, -50%)`,
+            }}
+          >
+            {hover.rows.map(([k, v], i) => (
+              <div key={i}>
+                {k && <span className="muted">{k} </span>}
+                <span className={i === 0 ? "" : "tabular"} style={i === 0 ? { fontWeight: 600 } : undefined}><Sup text={v} /></span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

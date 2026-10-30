@@ -6,6 +6,7 @@ import { feature } from "topojson-client";
 import type { Topology } from "topojson-specification";
 import land50 from "world-atlas/land-50m.json";
 import { useMounted } from "@/lib/useMounted";
+import { useViewScale } from "@/lib/useWidth";
 
 export type RateCell = { lat0: number; lon0: number; size: number; events: number; hours: number };
 
@@ -32,6 +33,7 @@ const latLabel = (l: number) => (l === 0 ? "0°" : `${Math.abs(l)}°${l < 0 ? "S
  */
 export default function RateMap({ cells, minHours }: { cells: RateCell[]; minHours: number }) {
   const mounted = useMounted();
+  const [scaleRef, k] = useViewScale<HTMLDivElement>(PW + MR);
   const [hover, setHover] = useState<RateCell | null>(null);
   const { land, projection } = useMemo(() => {
     const topo = land50 as unknown as Topology;
@@ -40,8 +42,8 @@ export default function RateMap({ cells, minHours }: { cells: RateCell[]; minHou
       .translate([ML + PW / 2, MT + (LAT_MAX / (LAT_MAX - LAT_MIN)) * PH]);
     return { projection, land: geoPath(projection).digits(1)(feature(topo, topo.objects.land as never)) ?? "" };
   }, []);
-  const H = MT + PH + MB;
-  if (!mounted) return <div style={{ aspectRatio: `${PW + MR} / ${H + 40}` }} />;
+  const H = MT + PH + MB * k;
+  if (!mounted) return <div ref={scaleRef} style={{ aspectRatio: `${PW + MR} / ${H + 40}` }} />;
 
   const xy = (lon: number, lat: number) => projection([lon, lat]) ?? [0, 0];
   const west = (c: RateCell) => (c.lon0 >= 180 ? c.lon0 - 360 : c.lon0);
@@ -50,8 +52,8 @@ export default function RateMap({ cells, minHours }: { cells: RateCell[]; minHou
   const left = hoverXY ? hoverXY[0] < W * 0.62 : true;
 
   return (
-    <div>
-      <div className="relative">
+    <div style={{ paddingLeft: k > 1.2 ? 40 : 0 }}>
+      <div ref={scaleRef} className="relative">
         <svg viewBox={`${ML} 0 ${PW + MR} ${H}`} className="w-full h-auto" style={{ overflow: "visible" }} role="img" aria-label="TGFs per hour of exposure in 5° cells">
           <defs>
             <clipPath id="rate-frame">
@@ -84,13 +86,13 @@ export default function RateMap({ cells, minHours }: { cells: RateCell[]; minHou
               return <rect x={x0} y={y0} width={x1 - x0} height={y1 - y0} fill="none" stroke="var(--accent)" strokeWidth={1.2} pointerEvents="none" />;
             })()}
           </g>
-          <rect x={ML} y={MT} width={PW} height={PH} fill="none" stroke="var(--border-strong)" strokeWidth={0.75} />
+          <rect x={ML} y={MT} width={PW} height={PH} fill="none" stroke="var(--border-strong)" strokeWidth={0.75 * k} />
           {[-120, -60, 0, 60, 120].map((l) => {
             const [x] = xy(l, 0);
             return (
               <g key={l}>
-                <line x1={x} x2={x} y1={MT + PH} y2={MT + PH + 4} stroke="var(--border-strong)" strokeWidth={0.75} />
-                <text x={x} y={MT + PH + 19} textAnchor="middle" fontSize={13} fill="var(--text-secondary)">{lonLabel(l)}</text>
+                <line x1={x} x2={x} y1={MT + PH} y2={MT + PH + 4 * k} stroke="var(--border-strong)" strokeWidth={0.75 * k} />
+                <text x={x} y={MT + PH + 19 * k} textAnchor="middle" fontSize={13 * k} fill="var(--text-secondary)">{lonLabel(l)}</text>
               </g>
             );
           })}
@@ -98,8 +100,8 @@ export default function RateMap({ cells, minHours }: { cells: RateCell[]; minHou
             const [, y] = xy(0, l);
             return (
               <g key={l}>
-                <line x1={ML - 4} x2={ML} y1={y} y2={y} stroke="var(--border-strong)" strokeWidth={0.75} />
-                <text x={ML - 8} y={y} dy="0.35em" textAnchor="end" fontSize={13} fill="var(--text-secondary)">{latLabel(l)}</text>
+                <line x1={ML - 4 * k} x2={ML} y1={y} y2={y} stroke="var(--border-strong)" strokeWidth={0.75 * k} />
+                <text x={ML - 8 * k} y={y} dy="0.35em" textAnchor="end" fontSize={13 * k} fill="var(--text-secondary)">{latLabel(l)}</text>
               </g>
             );
           })}
@@ -129,7 +131,7 @@ export default function RateMap({ cells, minHours }: { cells: RateCell[]; minHou
           ))}
           {STEPS.map((s, k) => (
             <g key={s}>
-              <line x1={10 + (k + 1) * 40} x2={10 + (k + 1) * 40} y1={12} y2={16} stroke="var(--border-strong)" strokeWidth={0.75} />
+              <line x1={10 + (k + 1) * 40} x2={10 + (k + 1) * 40} y1={12} y2={16} stroke="var(--border-strong)" strokeWidth={0.75 * k} />
               <text x={10 + (k + 1) * 40} y={29} textAnchor="middle" fontSize={13} fill="var(--text-secondary)" className="tabular">{s}</text>
             </g>
           ))}
